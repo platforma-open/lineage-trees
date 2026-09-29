@@ -1,0 +1,65 @@
+ll := import("@platforma-sdk/workflow-tengo:ll")
+pt := import("@platforma-sdk/workflow-tengo:pt")
+slices := import("@platforma-sdk/workflow-tengo:slices")
+
+// Column names and types, so ensureUniqueness can cast integer columns back after its all-String read.
+ensureUniquenessParamsFromPconvParams := func(pfConvParams) {
+    return {
+        axes: slices.map(pfConvParams.axes, func(axis) {
+            return { column: axis.column, type: axis.spec.type }
+        }),
+        columns: slices.map(pfConvParams.columns, func(col) {
+            return { column: col.column, type: col.spec.valueType }
+        })
+    }
+}
+
+// Dedups by-nodes output by its native key. "first" keeps the first row per key;
+// "max" or "min" keeps the row with the greatest or least `rankCol`.
+ensureUniqueness := func(inputTsv, params, mode, ...rankCol) {
+    allCols := []
+    for axis in params.axes {
+        allCols = append(allCols, axis)
+    }
+    for col in params.columns {
+        allCols = append(allCols, col)
+    }
+
+    keyNames := slices.map(params.axes, func(axis) { return axis.column })
+
+    wf := pt.workflow()
+
+    df := wf.frame({ file: inputTsv, xsvType: "tsv" }, { inferSchema: false })
+
+    intCasts := []
+    for c in allCols {
+        if c.type == "Long" || c.type == "Int" {
+            intCasts = append(intCasts, pt.col(c.column).cast("Double").round().cast(c.type).alias(c.column))
+        }
+    }
+    if len(intCasts) > 0 {
+        df = df.withColumns(intCasts...)
+    }
+
+    result := undefined
+    if mode == "max" || mode == "min" {
+        ll.assert(len(rankCol) == 1, "ensureUniqueness: mode %v needs a ranking column", mode)
+        by := pt.col(rankCol[0])
+        aggs := slices.map(params.columns, func(col) {
+            c := pt.col(col.column)
+            return (mode == "max" ? c.maxBy(by) : c.minBy(by)).alias(col.column)
+        })
+        result = df.groupBy(keyNames...).agg(aggs...)
+    } else {
+        ll.assert(mode == "first", "ensureUniqueness: unknown mode %v", mode)
+        result = df.unique({ subset: keyNames, keep: "first", maintainOrder: true })
+    }
+
+    result.save("output.tsv")
+    return wf.run().getFile("output.tsv")
+}
+
+export ll.toStrict({
+    ensureUniqueness: ensureUniqueness,
+    ensureUniquenessParamsFromPconvParams: ensureUniquenessParamsFromPconvParams
+})

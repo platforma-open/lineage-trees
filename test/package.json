@@ -1,0 +1,28 @@
+{
+  "name": "@platforma-open/milaboratories.lineage-trees.test",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fmt": "ts-builder format",
+    "check": "ts-builder check --target block-test",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "this-block": "workspace:@platforma-open/milaboratories.lineage-trees.block@*"
+  },
+  "devDependencies": {
+    "@milaboratories/ts-builder": "catalog:",
+    "@milaboratories/ts-configs": "catalog:",
+    "@platforma-open/milaboratories.import-vdj": "catalog:",
+    "@platforma-open/milaboratories.lineage-trees.model": "workspace:*",
+    "@platforma-open/milaboratories.mixcr-clonotyping-2": "catalog:",
+    "@platforma-open/milaboratories.samples-and-data": "catalog:",
+    "@platforma-sdk/model": "catalog:",
+    "@platforma-sdk/test": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "typescript": "*"
+  }
+}

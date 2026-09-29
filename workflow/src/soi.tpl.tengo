@@ -1,0 +1,159 @@
+// Searches one sequence list against one node property column on [lineage, node]
+// with mitool. Imports the hits per node and per lineage (best hit per lineage).
+self := import("@platforma-sdk/workflow-tengo:tpl")
+ll := import("@platforma-sdk/workflow-tengo:ll")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+maps := import("@platforma-sdk/workflow-tengo:maps")
+exec := import("@platforma-sdk/workflow-tengo:exec")
+xsv := import("@platforma-sdk/workflow-tengo:pframes.xsv")
+json := import("json")
+soiExport := import(":soi-export")
+tablesAgg := import(":tables-aggregation")
+
+// mitool banded-alignment presets per alphabet. `fullPenalty` is the target feature's
+// penalty scale; the dissimilarity percent is taken of it. Values from mixcr-shm-trees.
+SEARCH_PRESETS := {
+	"nucleotide": {
+		scoring: { match: 1, mismatch: -2, gap: { type: "affine", openPenalty: -3, extensionPenalty: -1 } },
+		band: 9,
+		fullPenalty: { CDR3: 51, VDJRegion: 369 }
+	},
+	"amino-acid": {
+		scoring: { matrix: "BLOSUM62", gap: { type: "affine", openPenalty: -10, extensionPenalty: -1 } },
+		band: 4,
+		fullPenalty: { CDR3: 93, VDJRegion: 641 }
+	}
+}
+
+self.defineOutputs("nodesResult", "treesResult", "hitCounts")
+
+mitoolSw := assets.importSoftware("@platforma-open/milaboratories.software-mitool:main")
+hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.hilary:main")
+
+self.body(func(inputs) {
+	querySpec := inputs.querySpec
+	queryData := inputs.queryData
+	db := inputs.db
+
+	dbData := "sequence\tname\n"
+	for entry in db.sequences {
+		dbData = dbData + entry.sequence + "\t" + entry.name + "\n"
+	}
+
+	originalAxesSpecs := querySpec.axesSpec
+	modifiedAxesSpecs := []
+	importAxesSpec := []
+
+	aggregationImportAxesSpec := []
+
+	for idx, spec in originalAxesSpecs {
+		colName := "key" + idx
+		modifiedAxesSpecs = append(modifiedAxesSpecs, maps.deepMerge(
+			spec,
+			{ annotations: { "pl7.app/label": colName } }
+		))
+		importAxesSpec = append(importAxesSpec, {
+			column: colName,
+			spec: spec
+		})
+
+		// Drop the node axis: one row per lineage.
+		if spec.name != "pl7.app/dendrogram/nodeId" {
+			aggregationImportAxesSpec = append(aggregationImportAxesSpec, {
+				column: colName,
+				spec: spec
+			})
+		}
+	}
+	modifiedQuerySpec := maps.deepMerge(querySpec, {
+		axesSpec: modifiedAxesSpecs,
+		annotations: {"pl7.app/label": "query"} })
+
+	inputTsv := xsv.exportFrame([{spec: modifiedQuerySpec, data: queryData}], "tsv", {})
+
+	actualSearchParameters := db.parameters.searchParameters
+	if actualSearchParameters.type == "preset_alignment_search_top" {
+		preset := SEARCH_PRESETS[db.parameters.type]
+		ll.assert(!is_undefined(preset), "Unknown alphabet: %v", db.parameters.type)
+		fullPenalty := preset.fullPenalty[db.parameters.targetFeature]
+		ll.assert(!is_undefined(fullPenalty), "Unknown target feature: %v", db.parameters.targetFeature)
+		actualSearchParameters = {
+			type: "banded_alignment_search_top",
+			scoring: preset.scoring,
+			band: preset.band,
+			maxPenalty: 1 + int(fullPenalty * db.parameters.searchParameters.dissimilarityPercent / 100)
+		}
+	}
+
+	searchCmd := exec.builder().
+		printErrStreamToStdout().
+		secret("MI_LICENSE", "MI_LICENSE").
+		software(mitoolSw).
+		arg("search").
+		arg("--alphabet").arg(db.parameters.type).
+		arg("--database").arg("database.tsv").
+		writeFile("database.tsv", dbData).
+		arg("--parameters").arg("params.json").
+		writeFile("params.json", json.encode(actualSearchParameters)).
+		arg("--hits-only").
+		arg("--target-column").arg("query").
+		arg("input.tsv").addFile("input.tsv", inputTsv).
+		arg("output.tsv").saveFile("output.tsv").
+		run()
+
+	resultCsv := searchCmd.getFile("output.tsv")
+
+	// Hit counts, so the list page can report no hits. The first exported column is the lineage key.
+	counted := exec.builder().
+		software(hilarySw).
+		addFile("hits.tsv", resultCsv).
+		arg("count-hits").
+		arg("--hits").arg("hits.tsv").
+		arg("--out").arg("counts.json").
+		saveFileContent("counts.json").
+		printErrStreamToStdout().
+		run()
+
+	resultColumns := soiExport.soiResultImportColumns(db.parameters)
+	resultConvParams := {
+		axes: importAxesSpec,
+		columns: resultColumns,
+		storageFormat: "Parquet",
+		partitionKeyLength: 0 // inferPartitionKeyLength(queryData)
+	}
+
+	aggregatedConvParams := {
+		axes: aggregationImportAxesSpec,
+		columns: resultColumns,
+		storageFormat: "Parquet",
+		partitionKeyLength: 0 // inferPartitionKeyLength(queryData)
+	}
+
+	// One row per tree, its best hit: highest score (alignment) or fewest mutations (tree search).
+	// Uses the list's own mode: the parameters above were rewritten for mitool.
+	isAlignment := db.parameters.searchParameters.type == "preset_alignment_search_top"
+	aggregatedCsv := tablesAgg.ensureUniqueness(
+		resultCsv,
+		tablesAgg.ensureUniquenessParamsFromPconvParams(aggregatedConvParams),
+		isAlignment ? "max" : "min",
+		isAlignment ? "score" : "mutations"
+	)
+
+	nodesResult := xsv.importFile(
+		resultCsv,
+		"tsv",
+		resultConvParams
+	)
+
+	treesResult := xsv.importFile(
+		aggregatedCsv,
+		"tsv",
+		aggregatedConvParams
+	)
+
+	return {
+		nodesResult: nodesResult,
+		treesResult: treesResult,
+		hitCounts: counted.getFileContent("counts.json")
+	}
+})

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Stands in for raxml-ng under dowser. Dowser's first call is a full topology search, which
+# does not scale past about 1,000 tips; this replaces it with a FastTree draft that raxml-ng
+# then fits (--evaluate: model and branch lengths, same output files). Any call naming a mode,
+# such as --ancestral, runs raxml-ng unchanged. Keep in step with raxml-ng-fasttree.R.
+# Programs come from RAXML_NG_EXEC and FASTTREE_EXEC, else from PATH.
+set -euo pipefail
+
+raxml="${RAXML_NG_EXEC:-$(command -v raxml-ng || echo /usr/local/bin/raxml-ng)}"
+fasttree="${FASTTREE_EXEC:-$(command -v FastTree || echo /usr/bin/fasttree)}"
+
+# Any call naming a mode is not the search, so it is not ours to change.
+for arg in "$@"; do
+  case "$arg" in
+    --ancestral|--evaluate|--bootstrap|--support|--check|--parse|--rfdist)
+      exec "$raxml" "$@" ;;
+  esac
+done
+
+# Dowser writes these as -msa and -prefix; accept both spellings.
+msa=""; prefix=""
+prev=""
+for arg in "$@"; do
+  case "$prev" in
+    -msa|--msa) msa="$arg" ;;
+    -prefix|--prefix) prefix="$arg" ;;
+  esac
+  prev="$arg"
+done
+if [ -z "$msa" ] || [ -z "$prefix" ]; then
+  echo "raxml-ng-fasttree: no --msa or --prefix in: $*" >&2
+  exit 2
+fi
+
+# FastTree cannot read dowser's relaxed phylip, so hand it FASTA.
+draft_fa="${prefix}.fasttree.fa"
+draft="${prefix}.fasttree.tree"
+awk 'NR > 1 && NF >= 2 { print ">" $1; print $2 }' "$msa" > "$draft_fa"
+
+# FastTree's accuracy recipe; -nosupport keeps the draft deterministic across reruns.
+"$fasttree" -nt -gtr -spr 4 -mlacc 2 -slownni -nosupport -quiet -nopr \
+  "$draft_fa" > "$draft"
+rm -f "$draft_fa"
+
+exec "$raxml" "$@" --evaluate --tree "$draft"
