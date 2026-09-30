@@ -418,7 +418,7 @@ self.body(func(inputs) {
 		saveFileContent("donor-stats.json").
 		saveFileContent("run-id.json").
 		saveFileContent("trees.log").
-		saveStdoutContent().
+		saveStdoutStream().
 		printErrStreamToStdout().
 		run()
 
@@ -427,6 +427,8 @@ self.body(func(inputs) {
 		alignmentsLogs: alignmentsLogs.build(),
 		clusteringLogs: clusteringLogs.build(),
 		treesLogs: treesLogs.build(),
+		// One run for all donors, after the last donor's trees.
+		collectLog: collected.getStdoutStream(),
 		alleleRoutes: alleleRoutes.build(),
 		clusteringMethods: clusteringMethods.build(),
 		nodes: collected.getFile("nodes.tsv"),

@@ -1066,7 +1066,15 @@ wf.body(func(args) {
 					"pl7.app/description": "How many clonotypes carry this node's sequence. More than one means the same sequence was seen in several samples or datasets."
 				}
 			})
-		]
+		] + (datasetCount > 1 ? [nodeProperty("dataset", {
+			name: "pl7.app/dendrogram/dataset",
+			valueType: "String",
+			annotations: {
+				"pl7.app/label": "Dataset",
+				"pl7.app/description": "The datasets the clonotypes at this node came from. Blank on inferred nodes.",
+				"pl7.app/isDiscreteFilter": "true"
+			}
+		})] : [])
 	}, { splitDataAndSpec: true }))
 
 	// Sequences of interest: mitool searches each list against the node column of its alphabet and feature.
@@ -1403,6 +1411,7 @@ wf.body(func(args) {
 			alignmentsLogs: perDonor.output("alignmentsLogs"),
 			clusteringLogs: perDonor.output("clusteringLogs"),
 			treesLogs: perDonor.output("treesLogs"),
+			collectLog: perDonor.output("collectLog"),
 			alleleRoutes: perDonor.output("alleleRoutes"),
 			clusteringMethods: perDonor.output("clusteringMethods"),
 			datasets: smart.createJsonResource(datasetRuns),

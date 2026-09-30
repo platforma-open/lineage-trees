@@ -7,12 +7,17 @@ import { useApp } from "./app";
 // The overview's rows, one per donor group. Shared by the grid and the log drawer.
 
 /** The stages a donor shows, each a bar of its own and a log of its own. */
-export type Stage = "alleles" | "clustering" | "trees";
+export type Stage = "alleles" | "clustering" | "trees" | "results";
 export const STAGES: { key: Stage; label: string }[] = [
   { key: "alleles", label: "Allele inference" },
   { key: "clustering", label: "Lineage clustering" },
   { key: "trees", label: "Tree reconstruction" },
+  // Run-wide: merged once every donor has its trees, then saved as the block's outputs.
+  { key: "results", label: "Results" },
 ];
+
+/** The stages each donor runs on its own; `results` is shared by all of them. */
+type DonorStage = Exclude<Stage, "results">;
 
 export type StageProgress = {
   status: "not_started" | "running" | "done";
@@ -60,10 +65,16 @@ export function useDonorRows() {
       clustering: byDonor(out.clusteringProgress?.data),
       trees: byDonor(out.treesProgress?.data),
     };
+    const collectLog = out.collectLog;
+    const isRunning = out.isRunning === true;
     const stats = new Map((out.donorStats ?? []).map((s) => [s.donor, s]));
     const donors = [
       ...new Set([...Object.values(logs).flatMap((m) => [...m.keys()]), ...stats.keys()]),
     ].sort();
+    const allTreesDone = donors.every((d) => {
+      const h = logs.trees.get(d);
+      return h !== undefined && !isLiveLog(h);
+    });
 
     return donors.map((donor) => {
       const handle = (stage: keyof typeof logs) => logs[stage].get(donor);
@@ -74,7 +85,7 @@ export function useDonorRows() {
 
       // `waiting`: the prior stage is done but this log has not started, so the backend is
       // scheduling it; show it as running, not queued.
-      const stage = (key: Stage, waiting: boolean, idleText: string): StageProgress => {
+      const stage = (key: DonorStage, waiting: boolean, idleText: string): StageProgress => {
         const h = handle(key);
         if (h !== undefined && !isLiveLog(h)) return { status: "done", text: "Done", percent: 100 };
         if (h === undefined && !waiting) return { status: "not_started", text: "Queued" };
@@ -84,11 +95,29 @@ export function useDonorRows() {
       };
 
       const done = (key: keyof typeof logs) => handle(key) !== undefined && !live(key);
+      const results = (): StageProgress => {
+        if (collectLog !== undefined && !isLiveLog(collectLog)) {
+          // The backend then imports the tables as columns, which reports no progress.
+          return isRunning
+            ? { status: "running", text: "Saving results" }
+            : { status: "done", text: "Done", percent: 100 };
+        }
+        if (collectLog !== undefined) {
+          const { step, percent } = parseLine(out.collectProgress, "Collecting results");
+          return { status: "running", text: step, percent };
+        }
+        if (!done("trees")) return { status: "not_started", text: "Queued" };
+        // Projects run before the collect log existed have none to show.
+        if (!isRunning) return { status: "done", text: "Done", percent: 100 };
+        return { status: "running", text: allTreesDone ? "Starting" : "Waiting for other donors" };
+      };
+
       const progress: Record<Stage, StageProgress> = {
         alleles: stage("alleles", false, "Inferring alleles"),
         // Joining alignments is plumbing for clustering, so it shows as clustering.
         clustering: stage("clustering", handle("alignments") !== undefined, "Lineage clustering"),
         trees: stage("trees", done("clustering"), "Starting"),
+        results: results(),
       };
       // The tree tool labels its build "Trees"; say what it is doing.
       if (progress.trees.status === "running") {
@@ -97,7 +126,7 @@ export function useDonorRows() {
 
       const handles: Partial<Record<Stage, AnyLogHandle>> = {};
       for (const { key } of STAGES) {
-        const h = handle(key);
+        const h = key === "results" ? collectLog : handle(key);
         if (h !== undefined) handles[key] = h;
       }
       const running = STAGES.find(({ key }) => progress[key].status === "running");

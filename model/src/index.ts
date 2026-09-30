@@ -320,6 +320,9 @@ const stageLogs = (outputs: TreeNodeAccessor | undefined, field: string) =>
 const stageProgress = (outputs: TreeNodeAccessor | undefined, field: string) =>
   stageStream(outputs, field, (acc) => acc.getProgressLog(PROGRESS_PREFIX));
 
+const collectStream = (outputs: TreeNodeAccessor | undefined) =>
+  outputs?.resolve({ field: "collectLog", assertFieldType: "Input", allowPermanentAbsence: true });
+
 const readAlleleRoute = (acc: TreeNodeAccessor) =>
   acc.getDataAsJson<{ route: string; reason: string }>();
 const readClusteringMethod = (acc: TreeNodeAccessor) =>
@@ -690,6 +693,10 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       hasAnchorProperty: nodeScoped.some(
         (column) => column.spec.name === "pl7.app/dendrogram/isAnchor",
       ),
+      // Emitted only on runs over several datasets; the tree page colours tips by it.
+      hasDatasetProperty: nodeScoped.some(
+        (column) => column.spec.name === "pl7.app/dendrogram/dataset",
+      ),
       // Only runs with light chains emit the light reconstructed sequence.
       hasLightSequence: lightSequence !== undefined,
       // What a basket copies from a node when it is added.
@@ -802,6 +809,9 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   .output("clusteringProgress", (ctx) => stageProgress(ctx.outputs, "clusteringLogs"))
   .output("treesLogs", (ctx) => stageLogs(ctx.outputs, "treesLogs"))
   .output("treesProgress", (ctx) => stageProgress(ctx.outputs, "treesLogs"))
+  /** The run-wide collect step after the last donor's trees; absent on older projects. */
+  .output("collectLog", (ctx) => collectStream(ctx.outputs)?.getLogHandle())
+  .output("collectProgress", (ctx) => collectStream(ctx.outputs)?.getProgressLog(PROGRESS_PREFIX))
 
   .output("isRunning", (ctx) => ctx.outputs?.getIsReadyOrError() === false)
 

@@ -1471,6 +1471,8 @@ if (length(units)) {
   rm(units)
 }
 
+# Merging and writing the results can take a while on large donors.
+progress("Saving trees")
 from_pool <- Filter(function(r) isTRUE(r$formatted), finished)
 formatted$lineages <- formatted$lineages + length(from_pool)
 formatted$seqs <- formatted$seqs + sum(vapply(from_pool, function(r) r$kept_seqs, integer(1)))
@@ -1545,6 +1547,7 @@ if (!is.null(builders_path)) {
     builders_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
 }
 
+progress("Linking tips to clonotypes")
 # Link each tip to every clonotype in its group; the representative is marked.
 tips <- nodes[nodes$is_observed == "true" & nodes$label != "Germline",
               c("lineage_id", "node_id", "label")]

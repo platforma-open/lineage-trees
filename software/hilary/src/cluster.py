@@ -645,12 +645,12 @@ def _read_clonotypes(args: argparse.Namespace, donors: list) -> pd.DataFrame:
     return pd.DataFrame(columns=["sequence_id"])
 
 
-def _node_abundance(present, links: pd.DataFrame) -> pd.DataFrame:
-    """Each node's abundance over all samples and clonotypes, with its clonotype count.
+def _node_abundance(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> pd.DataFrame:
+    """Each node's abundance over all samples and clonotypes, its clonotype count and datasets.
 
     No sample axis: the dendrogram could not join it.
     """
-    columns = ["lineage_id", "node_id", "abundance", "clonotype_count"]
+    columns = ["lineage_id", "node_id", "abundance", "clonotype_count", "dataset"]
     if present is None or links.empty:
         return pd.DataFrame(columns=columns)
     placed = links[["lineage_id", "node_id", "sequence_id"]].merge(
@@ -659,14 +659,28 @@ def _node_abundance(present, links: pd.DataFrame) -> pd.DataFrame:
     if placed.empty:
         return pd.DataFrame(columns=columns)
     summed = placed.groupby(["lineage_id", "node_id"], as_index=False)["abundance"].sum()
+    # Datasets as merge named them, "A, B" when seen in both. One flag per dataset rides the
+    # count's groupby; single-dataset runs skip it.
+    names = []
+    if "data_source" in clonotypes.columns:
+        names = sorted(set(clonotypes["data_source"]) - {""})
+    flags = {}
+    if len(names) > 1:
+        source = clonotypes.drop_duplicates("sequence_id").set_index("sequence_id")["data_source"]
+        of_link = source.reindex(links["sequence_id"]).to_numpy()
+        flags = {f"_in{i}": of_link == name for i, name in enumerate(names)}
     counted = (
-        links.groupby(["lineage_id", "node_id"], as_index=False)["sequence_id"]
-        .nunique()
-        .rename(columns={"sequence_id": "clonotype_count"})
+        links[["lineage_id", "node_id", "sequence_id"]].assign(**flags)
+        .groupby(["lineage_id", "node_id"], as_index=False)
+        .agg(clonotype_count=("sequence_id", "nunique"), **{f: (f, "max") for f in flags})
     )
+    if flags:
+        mask = sum(counted[f"_in{i}"].astype("int64") * (1 << i) for i in range(len(names)))
+        labels = {m: ", ".join(n for i, n in enumerate(names) if m >> i & 1) for m in mask.unique()}
+        counted = counted.drop(columns=list(flags)).assign(dataset=mask.map(labels))
     return summed.merge(counted, on=["lineage_id", "node_id"], how="right").fillna(
-        {"abundance": 0},
-    ).reindex(columns=columns)
+        {"abundance": 0, "dataset": ""},
+    ).reindex(columns=columns, fill_value="")
 
 
 def _node_metadata(args: argparse.Namespace, present, links: pd.DataFrame) -> pd.DataFrame:
@@ -718,6 +732,13 @@ def collect(args: argparse.Namespace) -> None:
     """Merge every donor's tree output, read by position as `split` wrote it, and summarise."""
     # No donor column: one unnamed group at position 0.
     donors = args.donor or [None]
+    steps = ["Reading tree outputs", "Labelling nodes", "Summarising lineages",
+             "Abundance and metadata", "Describing lineages", "Writing per-dataset tables"]
+
+    def step(text: str) -> None:
+        progress(f"{text}: {100 * steps.index(text) / len(steps):.0f}%")
+
+    step("Reading tree outputs")
 
     lineage_parts, node_parts, link_parts, builder_parts = [], [], [], []
     cdist_parts, support_parts, distance_parts, germline_parts = [], [], [], []
@@ -746,6 +767,7 @@ def collect(args: argparse.Namespace) -> None:
     # Tip labels are prefixed clonotype ids; strip the prefix.
     links = _concat(link_parts, NODE_LINK_FILE_COLUMNS)
     clonotypes = _read_clonotypes(args, donors)
+    step("Labelling nodes")
     if not nodes.empty:
         observed_label = nodes["label"].astype(str).str.contains(DATASET_SEP, regex=False)
         nodes.loc[observed_label, "label"] = unprefixed(nodes.loc[observed_label, "label"])
@@ -754,6 +776,7 @@ def collect(args: argparse.Namespace) -> None:
     if args.out_node_properties is not None:
         _node_properties(links, clonotypes).to_csv(args.out_node_properties, sep="\t", index=False)
 
+    step("Summarising lineages")
     # cluster_size: distinct sequences (tree step groups). tip_count: tips actually
     # drawn, zero when no tree was built. Without groups, each clonotype is its own.
     sized = lineages.copy()
@@ -788,6 +811,7 @@ def collect(args: argparse.Namespace) -> None:
 
     # TODO(badges): the pass / alert / ignore quality badge (spec Deliverable 1) goes here.
 
+    step("Abundance and metadata")
     present = None
     dataset_total = None
     have_abundance = args.abundance is not None and args.abundance.exists()
@@ -815,7 +839,8 @@ def collect(args: argparse.Namespace) -> None:
     if args.out_node_metadata is not None:
         _node_metadata(args, present, links).to_csv(args.out_node_metadata, sep="\t", index=False)
     if args.out_node_abundance is not None:
-        _node_abundance(present, links).to_csv(args.out_node_abundance, sep="\t", index=False)
+        _node_abundance(present, links, clonotypes).to_csv(args.out_node_abundance, sep="\t", index=False)
+    step("Describing lineages")
     described = _lineage_descriptors(lineages, clonotypes, present, dataset_total)
     lineage_stats = lineage_stats.merge(described, on="lineage_id", how="left")
     # Show the donor in its own column and the label without it; the id is unchanged.
@@ -838,6 +863,7 @@ def collect(args: argparse.Namespace) -> None:
         lineage_stats["anchor_count"] = 0
     lineage_stats.to_csv(args.out_lineage_stats, sep="\t", index=False)
 
+    step("Writing per-dataset tables")
     cdist = _concat(cdist_parts, AA_CDIST_COLUMNS)
     _write_per_dataset(args, lineages, links, cdist, support, expansion,
                        _concat(distance_parts, ANCHOR_DISTANCE_COLUMNS),
@@ -864,6 +890,7 @@ def collect(args: argparse.Namespace) -> None:
                 path = args.logs_dir / f"donor-{index}.log"
                 out.write(f"=== {donor if donor is not None else 'all samples'} ===\n")
                 out.write(path.read_text() if path.exists() else "no log\n")
+    progress("Collected: 100%")
 
 
 def count_hits(args: argparse.Namespace) -> None:

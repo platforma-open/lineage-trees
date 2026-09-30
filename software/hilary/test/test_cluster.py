@@ -46,11 +46,12 @@ def write(path: Path, rows: list[dict]) -> Path:
     return path
 
 
-def stage(*argv: str) -> None:
+def stage(*argv: str) -> str:
     done = subprocess.run([sys.executable, str(CLUSTER), *map(str, argv)],
                           capture_output=True, text=True)
     if done.returncode:
         raise SystemExit(f"{argv[0]} failed:\n{done.stdout}\n{done.stderr}")
+    return done.stdout
 
 
 def read(path: Path) -> pd.DataFrame:
@@ -112,7 +113,7 @@ def main(tmp: Path) -> None:
         assigned.to_csv(tmp / "lineages" / f"donor-{index}.tsv", sep="\t", index=False)
         per_donor[donor] = dict(zip(assigned["sequence_id"], assigned["lineage_id"]))
     out = tmp / "out"
-    stage("collect", "--lineages-dir", tmp / "lineages", "--nodes-dir", tmp / "nodes",
+    collect_out = stage("collect", "--lineages-dir", tmp / "lineages", "--nodes-dir", tmp / "nodes",
           "--node-links-dir", tmp / "node-links", "--abundance", abundance,
           "--donors", donors_tsv, "--clonotypes", merged, *donor_args,
           "--dataset", "0", "--dataset", "1", "--per-dataset-dir", out,
@@ -140,6 +141,11 @@ def main(tmp: Path) -> None:
     ok("an empty donor clusters to nothing rather than failing", not per_donor["C"])
 
     print("== collect ==")
+    # The UI reads the last "[==PROGRESS==]" line: a rising percentage, ending at 100%.
+    percents = [float(line.rsplit(": ", 1)[1].rstrip("%"))
+                for line in collect_out.splitlines() if line.startswith("[==PROGRESS==]")]
+    ok("collect reports rising progress, ending at 100%",
+       len(percents) > 2 and percents == sorted(percents) and percents[-1] == 100.0)
     members = read(out / "lineages-0.tsv")
     ok("per-dataset tables drop the dataset prefix",
        set(members["sequence_id"]) == {"xigh", "g-ig", "paired", "vdiff", "jdiff", "far", "both"})
@@ -175,6 +181,18 @@ def main(tmp: Path) -> None:
     got = cluster._node_metadata(argparse.Namespace(sample_metadata=[("0", meta)]), present, links)
     ok("node metadata with nothing placed still carries the count columns",
        list(got.columns) == ["lineage_id", "node_id", "timepoint", "timepoint__count"])
+
+    # A node's datasets, from merge's data_source, in the pass that counts its clonotypes.
+    placed = pd.DataFrame({"sequence_id": ["0_a", "1_b"], "lineage_id": ["L1", "L1"],
+                           "abundance": [2.0, 3.0]})
+    node_links = pd.DataFrame({"lineage_id": ["L1", "L1", "L1"], "node_id": ["1", "1", "2"],
+                               "sequence_id": ["0_a", "1_b", "0_a"]})
+    sources = pd.DataFrame({"sequence_id": ["0_a", "1_b"], "data_source": ["mixcr", "imported"]})
+    got = cluster._node_abundance(placed, node_links, sources).set_index("node_id")
+    ok("a node seen in two datasets names both, sorted; one seen in one names it",
+       got.loc["1", "dataset"] == "imported, mixcr" and got.loc["2", "dataset"] == "mixcr")
+    ok("and its clonotype count and abundance are unchanged",
+       got.loc["1", "clonotype_count"] == 2 and got.loc["1", "abundance"] == 5.0)
 
     # Run id: row order must not change it, membership must.
     members = pd.DataFrame({"sequence_id": ["a", "b"], "lineage_id": ["L1", "L1"]})

@@ -44,14 +44,30 @@ const nodeProperty = (name: string, label: string) => ({
   },
 });
 
+const hasDataset = computed(() => app.model.outputs.treeNodeColumns?.hasDatasetProperty === true);
+
 const defaultOptions = computed(
   () =>
     [
-      // With anchors in the run, tips are colored by them from the start.
-      ...(app.model.outputs.treeNodeColumns?.hasAnchorProperty
+      // Several datasets: tips colored by dataset. Anchors then take the shape, else the color.
+      ...(hasDataset.value
         ? [
             {
               inputName: "nodeColor",
+              selectedSource: {
+                kind: "PColumn",
+                name: "pl7.app/dendrogram/dataset",
+                valueType: "String",
+                annotations: { ...NODE_PROPERTY, "pl7.app/label": "Dataset" },
+                axesSpec: [],
+              },
+            },
+          ]
+        : []),
+      ...(app.model.outputs.treeNodeColumns?.hasAnchorProperty
+        ? [
+            {
+              inputName: hasDataset.value ? "nodeShape" : "nodeColor",
               selectedSource: {
                 kind: "PColumn",
                 name: "pl7.app/dendrogram/isAnchor",
