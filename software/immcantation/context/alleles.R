@@ -67,9 +67,16 @@ finish <- function(route, reason) {
     }
   }
   if (!is.null(route_path)) {
-    writeLines(sprintf('{"route":"%s","reason":"%s"}', route, gsub('"', "'", reason)), route_path)
+    # TIgGER's error messages span lines, so the reason is JSON-escaped.
+    writeLines(jsonlite::toJSON(list(route = route, reason = reason), auto_unbox = TRUE), route_path)
   }
   quit(status = 0)
+}
+
+# The V call to group by: `v_allele` where an import carries it beside a gene-level `v_call`.
+v_call_of <- function(d) {
+  if (!"v_allele" %in% names(d)) return(d$v_call)
+  ifelse(present(d$v_allele), d$v_allele, d$v_call)
 }
 
 # The pool: every heavy row with a full alignment, from any table. `src` is 0 for the
@@ -77,14 +84,15 @@ finish <- function(route, reason) {
 usable_rows <- function(d) {
   if (!nrow(d)) return(integer(0))
   if (!all(ALIGNMENT_COLUMNS %in% names(d))) return(integer(0))
+  v_call <- v_call_of(d)
   which(present(d$sequence_alignment) & present(d$germline_alignment) &
-        present(d$v_call) & present(d$junction) &
-        substr(gene_of(d$v_call), 1, 3) == HEAVY)
+        present(v_call) & present(d$junction) &
+        substr(gene_of(v_call), 1, 3) == HEAVY)
 }
 
 slice_of <- function(d, rows, src) {
   data.frame(src = rep(src, length(rows)), row = rows,
-             v_call = d$v_call[rows], j_call = d$j_call[rows],
+             v_call = v_call_of(d)[rows], j_call = d$j_call[rows],
              junction = d$junction[rows],
              sequence_alignment = d$sequence_alignment[rows],
              germline_alignment = d$germline_alignment[rows],

@@ -48,6 +48,12 @@ wf.prepare(func(args) {
 				domain: { "pl7.app/vdj/reference": gene + "Gene" }
 			}, bundleKey(gene + "Gene", i))
 		}
+		// Allele inference groups by allele; import-vdj-data strips it from the gene hit.
+		bundleBuilder.addMulti({
+			axes: [{ anchor: anchor, idx: 1 }],
+			name: "pl7.app/vdj/geneHitWithAllele",
+			domain: { "pl7.app/vdj/reference": "VGene" }
+		}, bundleKey("VAllele", i))
 
 		// MiXCR's CDR3 spans Cys to Trp/Phe, i.e. AIRR's junction.
 		bundleBuilder.addMulti({
@@ -265,6 +271,10 @@ wf.body(func(args) {
 				if !is_undefined(sequence) && !is_undefined(germline) {
 					clonotypeTableBuilder.add(sequence, { header: "sequence_alignment" + suffix })
 					clonotypeTableBuilder.add(germline, { header: "germline_alignment" + suffix })
+				}
+				allele := chainOf("VAllele", key)
+				if suffix == "" && !is_undefined(allele) {
+					clonotypeTableBuilder.add(allele, { header: "v_allele" })
 				}
 			}
 		}

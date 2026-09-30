@@ -106,6 +106,27 @@ for (column in c("sequence_alignment", "germline_alignment")) {
 }
 write_tsv(misnumbered, file.path(work, "misnumbered.tsv"))
 write_tsv(donor[0, ], file.path(work, "empty.tsv"))
+# As import-vdj-data hands it over: the gene in v_call, the allele in v_allele.
+stripped <- donor
+stripped$v_allele <- stripped$v_call
+stripped$v_call <- gene_of(stripped$v_call)
+write_tsv(stripped, file.path(work, "stripped.tsv"))
+# MiXCR: a gene-level table without alignments, the alleles in the AIRR exports.
+# The whole donor, as half of it is too few for TIgGER.
+all_airr <- file.path(work, "airr-all")
+dir.create(all_airr, showWarnings = FALSE)
+write_tsv(donor, file.path(all_airr, "ds0__s1.tsv"))
+mixcr_table <- donor
+mixcr_table$v_call <- gene_of(mixcr_table$v_call)
+mixcr_table$sequence_alignment <- ""
+mixcr_table$germline_alignment <- ""
+write_tsv(mixcr_table, file.path(work, "mixcr.tsv"))
+# Both in one donor, as merge leaves it: MiXCR rows get an empty v_allele.
+mixed <- stripped
+mixed$v_allele[in_airr] <- ""
+mixed$sequence_alignment[in_airr] <- ""
+mixed$germline_alignment[in_airr] <- ""
+write_tsv(mixed, file.path(work, "mixed.tsv"))
 
 run <- function(name, input, airr_dir = NULL) {
   out <- file.path(work, paste0(name, "-out.tsv"))
@@ -127,7 +148,10 @@ RUNS <- list(
   bare = list("bare", file.path(work, "bare.tsv"), bare_airr),
   shallow = list("shallow", file.path(work, "shallow.tsv")),
   misnumbered = list("misnumbered", file.path(work, "misnumbered.tsv")),
-  empty = list("empty", file.path(work, "empty.tsv")))
+  empty = list("empty", file.path(work, "empty.tsv")),
+  stripped = list("stripped", file.path(work, "stripped.tsv")),
+  mixcr = list("mixcr", file.path(work, "mixcr.tsv"), all_airr),
+  mixed = list("mixed", file.path(work, "mixed.tsv"), airr_dir))
 results <- parallel::mclapply(RUNS, function(a) do.call(run, a),
                               mc.cores = length(RUNS), mc.preschedule = FALSE)
 tail_of <- function(r) cat(substr(r$log, max(1, nchar(r$log) - 1500), nchar(r$log)), "\n")
@@ -201,6 +225,42 @@ if (isTRUE(r$ok) && !is.null(back)) {
      any(back$v_call != donor$v_call[in_airr]) &&
        identical(r$out$v_call[in_airr][unique_key], back$v_call[unique_key]))
 } else tail_of(r)
+
+cat("== gene-level v_call with the allele beside it ==\n")
+r <- results$stripped
+ok("stripped: groups by v_allele, so the alignments are on one numbering and TIgGER runs",
+   isTRUE(r$ok) && r$route$route == "tigger")
+if (!isTRUE(r$ok) || r$route$route != "tigger") tail_of(r)
+
+# MiXCR rows reach TIgGER through the AIRR exports; their gene-level table rows follow by join key.
+for (name in c("mixcr", "mixed")) {
+  cat(sprintf("== %s ==\n", name))
+  r <- results[[name]]
+  back <- r$airr[["ds0__s1.tsv"]]
+  airr_rows <- if (name == "mixcr") seq_len(nrow(donor)) else in_airr
+  ok(sprintf("%s: TIgGER runs, pooled from the table and the AIRR file", name),
+     isTRUE(r$ok) && r$route$route == "tigger" &&
+       grepl(sprintf("pooled %d heavy sequences with alignments from the clonotype table and 1 AIRR file",
+                     nrow(donor)), r$log, fixed = TRUE))
+  if (!isTRUE(r$ok) || is.null(back)) { tail_of(r); next }
+  fixed_airr <- intersect(mislabelled, airr_rows)
+  ok(sprintf("%s: mislabelled AIRR rows go back to their allele", name),
+     length(fixed_airr) > 0 && all(allele_of(back$v_call[match(fixed_airr, airr_rows)]) == from))
+  unique_key <- !(duplicated(join_key[airr_rows]) | duplicated(join_key[airr_rows], fromLast = TRUE))
+  # Rows whose AIRR call did not change keep the gene-level call they came with.
+  # Unique join keys only: a shared key takes whichever of its rows moved.
+  changed <- back$v_call != donor$v_call[airr_rows]
+  input <- read_tsv(file.path(work, paste0(name, ".tsv")))
+  ok(sprintf("%s: MiXCR table rows take their AIRR row's new call, the rest keep theirs", name),
+     any(changed & unique_key) &&
+       identical(r$out$v_call[airr_rows][changed & unique_key], back$v_call[changed & unique_key]) &&
+       identical(r$out$v_call[airr_rows][!changed & unique_key], input$v_call[airr_rows][!changed & unique_key]))
+  if (name == "mixed") {
+    fixed_table <- intersect(mislabelled, in_table)
+    ok("mixed: mislabelled imported rows go back to their allele",
+       length(fixed_table) > 0 && all(allele_of(r$out$v_call[fixed_table]) == from))
+  }
+}
 
 # Each case must keep the reference alleles, not fail.
 for (case in list(
