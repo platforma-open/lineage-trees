@@ -171,6 +171,24 @@ truncated$sequence_alignment[pad] <- paste0(strrep(".", 115),
 write_scenario(file.path(out_root, "truncated"), truncated, light, character(),
                with_light_columns = FALSE, alignments = "table")
 
+# --- gapped, mixedgaps -----------------------------------------------------
+# One donor's rows IMGT-gapped, then half of them ungapped as another tool would write them.
+write_scenario(file.path(out_root, "gapped"), heavy, light, character(),
+               with_light_columns = FALSE, alignments = "table")
+ungap_row <- function(s, g) {
+  sc <- strsplit(s, "")[[1]]; gc <- strsplit(g, "")[[1]]
+  keep <- gc != "."
+  c(paste(sc[keep], collapse = ""), paste(gc[keep], collapse = ""))
+}
+mixedgaps <- heavy
+half <- seq_len(nrow(mixedgaps)) %% 2 == 0
+pairs <- mapply(ungap_row, mixedgaps$sequence_alignment[half], mixedgaps$germline_alignment[half],
+                USE.NAMES = FALSE)
+mixedgaps$sequence_alignment[half] <- pairs[1, ]
+mixedgaps$germline_alignment[half] <- pairs[2, ]
+write_scenario(file.path(out_root, "mixedgaps"), mixedgaps, light, character(),
+               with_light_columns = FALSE, alignments = "table")
+
 # --- tiny, empty, bare ----------------------------------------------------
 tiny <- heavy %>% group_by(clone_id) %>% slice_head(n = 2) %>% ungroup() %>% as.data.frame()
 write_scenario(file.path(out_root, "tiny"), tiny, light, character())

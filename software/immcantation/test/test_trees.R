@@ -66,6 +66,8 @@ RUN_SPECS <- list(
   list("joins", TRUE, "raxml", TRUE),
   list("table", TRUE, "raxml", FALSE),
   list("truncated", FALSE, "raxml", FALSE),
+  list("gapped", FALSE, "raxml", FALSE),
+  list("mixedgaps", FALSE, "raxml", FALSE),
   list("tiny", TRUE, "igphyml", TRUE),
   list("empty", TRUE, "raxml", TRUE),
   list("bare", FALSE, "raxml", FALSE))
@@ -286,9 +288,10 @@ check_truncated <- function(r, label, junction_only = FALSE) {
     "flanks are whole codons" =
       all(as.integer(a$frame_left) %% 3 == 0) && all(as.integer(a$frame_right) %% 3 == 0),
     "rows are whole codons" = all(nchar(a$sequence_alignment) %% 3 == 0),
-    # Interior "." are IMGT gaps and stay; edge runs are exporter padding and must go.
+    # Exporter padding and IMGT gaps both go; a "." left is a deletion against the germline.
     "exporter padding gone" =
       !any(grepl("^\\.", a$sequence_alignment)) && !any(grepl("\\.$", a$sequence_alignment)),
+    "no IMGT gap left in the germline" = !any(grepl(".", a$germline_alignment, fixed = TRUE)),
     "no germline in-frame stop" = all(vapply(a$germline_alignment, in_frame_stops, integer(1)) == 0L),
     "tree step keeps its sequences" = !grepl("No clones remain after makeAirrClone", r$log))
   if (junction_only) {
@@ -455,6 +458,18 @@ if (isTRUE(tr$ok)) {
     "coverages differ" = length(unique(as.integer(tr$aligned$frame_left))) > 2,
     "padded" = grepl("padded to a common frame", tr$log) && !grepl("alignment lengths differ", tr$log)))
 }
+
+cat("== mixedgaps: IMGT-gapped and ungapped rows in one donor ==\n")
+gp <- run_trees("gapped")
+mg <- run_trees("mixedgaps")
+if (isTRUE(gp$ok) && isTRUE(mg$ok)) {
+  by_id <- function(a) a[order(a$sequence_id), c("sequence_id", "sequence_alignment", "germline_alignment")]
+  ok_all("mixedgaps: gaps removed, so both conventions rebuild to the same rows and trees", list(
+    "says so" = grepl("IMGT gaps removed from", mg$log, fixed = TRUE),
+    "same rows as all gapped" = identical(by_id(gp$aligned), by_id(mg$aligned)),
+    "no gap left in a germline" = !any(grepl(".", mg$aligned$germline_alignment, fixed = TRUE)),
+    "trees are built" = nrow(mg$nodes) > 0 && nrow(mg$nodes) == nrow(gp$nodes)))
+} else crashed(if (isTRUE(gp$ok)) mg else gp, "mixedgaps: runs")
 
 cat("== tiny: IgPhyML, two tips per lineage ==\n")
 g <- run_trees("tiny")

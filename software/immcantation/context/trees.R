@@ -422,6 +422,13 @@ reframe <- function(seq, germ, junction) {
   s <- charToRaw(seq)
   g <- charToRaw(germ)
   if (length(s) != length(g) || !nzchar(junction)) return(NULL)
+  # IMGT gaps out: inputs may be gapped to different references or not at all. A query base
+  # under a germline gap is an insertion, dropped with the others below.
+  g[g == DOT & s != DOT & s != DASH] <- DASH
+  keep <- g != DOT
+  gap_columns <- sum(!keep)
+  s <- s[keep]
+  g <- g[keep]
   bases <- which(s != DOT & s != DASH)
   if (!length(bases)) return(NULL)
   ungapped <- toupper(rawToChar(s[bases]))
@@ -453,14 +460,14 @@ reframe <- function(seq, germ, junction) {
        germ = rawToChar(c(g[left], n_mid, g[right])),
        masked = rawToChar(c(s[left], n_mid, s[right])),
        dropped = columns - length(left) - length(right),
-       left = length(left), right = length(right))
+       left = length(left), right = length(right), gaps = gap_columns)
 }
 
 # In chunks, written straight into columns: one result list per row ran out of memory at 1M rows.
 REFRAME_CHUNK <- as.integer(Sys.getenv("REFRAME_CHUNK", "50000"))
 n <- nrow(joined)
 seq_out <- germ_out <- masked_out <- rep(NA_character_, n)
-left_out <- right_out <- dropped <- rep(NA_integer_, n)
+left_out <- right_out <- dropped <- gaps <- rep(NA_integer_, n)
 for (from in seq.int(1L, n, by = REFRAME_CHUNK)) {
   idx <- from:min(n, from + REFRAME_CHUNK - 1L)
   # Rows are independent, so a chunk is split over the stage's workers.
@@ -480,6 +487,7 @@ for (from in seq.int(1L, n, by = REFRAME_CHUNK)) {
   left_out[ok] <- pick("left", integer(1))
   right_out[ok] <- pick("right", integer(1))
   dropped[ok] <- pick("dropped", integer(1))
+  gaps[ok] <- pick("gaps", integer(1))
 }
 placed <- !is.na(seq_out)
 if (any(!placed)) {
@@ -494,6 +502,11 @@ joined$germline_alignment <- germ_out[placed]
 joined$frame_left <- left_out[placed]
 joined$frame_right <- right_out[placed]
 dropped <- dropped[placed]
+gaps <- gaps[placed]
+if (any(gaps > 0)) {
+  cat(sprintf("IMGT gaps removed from %d of %d alignments (%d gap columns), so alignments gapped to different references, or not gapped, line up\n",
+              sum(gaps > 0), length(gaps), sum(gaps)))
+}
 cat(sprintf("alignments rebuilt in the germline frame: %d insertion columns dropped from %d of %d rows\n",
             sum(dropped), sum(dropped > 0), length(dropped)))
 # Coverage either side of the junction (full VDJRegion: 309 left); short rows are kept.
@@ -663,7 +676,7 @@ CODON_TABLE <- {
 # The residues a branch can be said to have changed between; X and gaps never.
 SETTLED_AA <- setdiff(unique(AA_BY_CODON), "*")
 
-# IMGT gaps are whole codons, so gapped alignments translate in frame. Vectorised over rows.
+# Rows arrive rebuilt in their germline's frame, gap columns gone, so they translate in frame. Vectorised over rows.
 translate_all <- function(nt) {
   nt <- toupper(nt)
   n <- nchar(nt) %/% 3
@@ -1066,7 +1079,7 @@ collapse_tree <- function(p) {
 }
 
 # Node rows and anchor distances for one tree. `lid` is the real lineage id, `gapped_*`
-# the gapped originals, `heavy_width` where heavy ends (dowser joins heavy then light).
+# the rebuilt rows with their deletions, `heavy_width` where heavy ends (dowser joins heavy then light).
 tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer_) {
   anchors <- NULL
   labels <- c(p$tip.label, rep(NA_character_, p$Nnode))

@@ -1,7 +1,9 @@
 #!/usr/bin/env Rscript
 # Infers a donor's V alleles with TIgGER, pooled over all the donor's datasets, against
 # germlines taken from the input's own alignments (grouped by v_call), not a packaged set.
-# Rewrites heavy-chain v_call and the V part of germline_alignment; never the sequence.
+# Reads the alignment step's rows, rebuilt around the junction, so positions agree whatever
+# tool or gapping produced them. Rewrites heavy-chain v_call and the V part of
+# germline_alignment in those rows; never the sequence.
 # Any failure leaves the donor on the reference alleles and writes the reason to --out-route.
 
 suppressMessages({library(tigger)})
@@ -14,9 +16,10 @@ local({
 
 clonotypes_path <- opt("--clonotypes")
 out_path <- opt("--out")
-# MiXCR alignments come as one AIRR export per sample; pooled from here, written back there.
-airr_dir <- opt("--airr-dir", required = FALSE)
-out_airr_dir <- opt("--out-airr-dir", required = FALSE)
+# The alignment step's rows: each rebuilt around its junction, V side first (`frame_left` bases).
+aligned_path <- opt("--aligned")
+out_aligned_path <- opt("--out-aligned")
+align_log_path <- opt("--align-log", required = FALSE)
 route_path <- opt("--out-route", required = FALSE)
 threads <- {
   t <- opt("--threads", required = FALSE)
@@ -32,9 +35,10 @@ min_sequences <- {
 HEAVY <- "IGH"
 # The last V positions are shaped by trimming, so polymorphisms there are mostly artefacts.
 THREE_PRIME_MARGIN <- 10L
-# "." is an IMGT gap, "-" a query insertion (no germline position there).
-GAP <- c(".", "-")
-ALIGNMENT_COLUMNS <- c("v_call", "j_call", "junction", "sequence_alignment", "germline_alignment")
+# TIgGER takes positions 1 to 312 as the V (IMGT's length), whatever its input.
+IMGT_V_LENGTH <- 312L
+ALIGNED_NEEDED <- c("sequence_id", "v_call", "j_call", "junction", "sequence_alignment",
+                    "germline_alignment", "locus", "frame_left")
 
 # Flushes, so a killed run's log ends at the step that was running.
 say <- function(...) { cat(sprintf(...)); flush(stdout()) }
@@ -45,27 +49,13 @@ allele_of <- function(x) sub(",.*$", "", x)
 present <- function(x) !is.na(x) & nzchar(x)
 
 clono <- read_tsv(clonotypes_path)
+aligned <- if (file.exists(aligned_path)) read_tsv(aligned_path) else data.frame()
 
-# AIRR files keep their names so the align stage can match them to datasets. They are
-# read one at a time to save memory; only the columns the inference needs are pooled.
-airr_names <- if (is.null(airr_dir)) character(0) else list.files(airr_dir, pattern = "\\.tsv$")
-airr_path <- function(n) file.path(airr_dir, n)
-out_airr_path <- function(n) file.path(out_airr_dir, n)
-ensure_out_airr <- function() {
-  if (!is.null(out_airr_dir)) dir.create(out_airr_dir, showWarnings = FALSE, recursive = TRUE)
-}
-
-# Always writes every table; this stage never fails the run. Unchanged files are copied as is.
+# Always writes both tables; this stage never fails the run.
 finish <- function(route, reason) {
   cat(sprintf("%s\n", reason))
   write_tsv(clono, out_path)
-  if (!is.null(out_airr_dir)) {
-    ensure_out_airr()
-    # Skip files already written, so a late failure keeps earlier rewrites.
-    for (n in airr_names) {
-      if (!file.exists(out_airr_path(n))) file.copy(airr_path(n), out_airr_path(n))
-    }
-  }
+  write_tsv(aligned, out_aligned_path)
   if (!is.null(route_path)) {
     # TIgGER's error messages span lines, so the reason is JSON-escaped.
     writeLines(jsonlite::toJSON(list(route = route, reason = reason), auto_unbox = TRUE), route_path)
@@ -73,111 +63,74 @@ finish <- function(route, reason) {
   quit(status = 0)
 }
 
-# The V call to group by: `v_allele` where an import carries it beside a gene-level `v_call`.
-v_call_of <- function(d) {
-  if (!"v_allele" %in% names(d)) return(d$v_call)
-  ifelse(present(d$v_allele), d$v_allele, d$v_call)
-}
-
-# The pool: every heavy row with a full alignment, from any table. `src` is 0 for the
-# clonotype table or the AIRR file index; `row` is the row there, for writing back.
-usable_rows <- function(d) {
-  if (!nrow(d)) return(integer(0))
-  if (!all(ALIGNMENT_COLUMNS %in% names(d))) return(integer(0))
-  v_call <- v_call_of(d)
-  which(present(d$sequence_alignment) & present(d$germline_alignment) &
-        present(v_call) & present(d$junction) &
-        substr(gene_of(v_call), 1, 3) == HEAVY)
-}
-
-slice_of <- function(d, rows, src) {
-  data.frame(src = rep(src, length(rows)), row = rows,
-             v_call = v_call_of(d)[rows], j_call = d$j_call[rows],
-             junction = d$junction[rows],
-             sequence_alignment = d$sequence_alignment[rows],
-             germline_alignment = d$germline_alignment[rows],
-             stringsAsFactors = FALSE)
+# What the alignment step did to the rows, shown here because its own log is not.
+if (!is.null(align_log_path) && file.exists(align_log_path)) {
+  notes <- grep("IMGT gaps removed|lost their alignment|insertion columns dropped",
+                readLines(align_log_path), value = TRUE)
+  for (n in notes) cat(sprintf("alignment: %s\n", trimws(sub("^\\[[^]]*\\]\\s*", "", n))))
 }
 
 if (!nrow(clono)) finish("reference", "no clonotypes for this donor")
+if (!nrow(aligned) || !all(ALIGNED_NEEDED %in% names(aligned))) {
+  finish("reference", "no clonotype has an alignment, so there is nothing to infer from")
+}
 
-parts <- list(slice_of(clono, usable_rows(clono), 0L))
-have_airr_columns <- FALSE
-for (k in seq_along(airr_names)) {
-  d <- read_tsv(airr_path(airr_names[k]))
-  have_airr_columns <- have_airr_columns || all(ALIGNMENT_COLUMNS %in% names(d))
-  parts[[length(parts) + 1]] <- slice_of(d, usable_rows(d), k)
-  rm(d)
+# The V call to group by: an import's `v_allele` where it carries one beside a gene-level
+# `v_call`, else the aligned row's call (MiXCR's AIRR rows carry the allele).
+call_of <- aligned$v_call
+if ("v_allele" %in% names(clono)) {
+  own <- clono$v_allele[match(aligned$sequence_id, clono$sequence_id)]
+  call_of <- ifelse(present(own), own, call_of)
 }
-invisible(gc())
-pool <- do.call(rbind, parts)
-rm(parts)
-# Checked apart from the count so the reason tells missing columns from a shallow donor.
-have_columns <- all(ALIGNMENT_COLUMNS %in% names(clono)) || have_airr_columns
-if (!have_columns) {
-  finish("reference", sprintf("no table carries %s, so there is nothing to infer from",
-                              paste(ALIGNMENT_COLUMNS, collapse = ", ")))
-}
-cat(sprintf("pooled %d heavy sequences with alignments from the clonotype table and %d AIRR file(s)\n",
-            nrow(pool), length(airr_names)))
+
+# The pool: every heavy row with a V side. Positions count from the junction, so they mean
+# the same germline position whatever tool, gapping or start the alignment had.
+left <- suppressWarnings(as.integer(aligned$frame_left))
+rows <- which(aligned$locus == HEAVY & present(aligned$sequence_alignment) &
+              present(aligned$germline_alignment) & present(call_of) &
+              !is.na(left) & left > 0L & substr(gene_of(call_of), 1, 3) == HEAVY)
+pool <- data.frame(
+  row = rows,
+  id = paste0("r", rows),
+  sequence_id = aligned$sequence_id[rows],
+  v_call = call_of[rows],
+  j_call = aligned$j_call[rows],
+  junction = aligned$junction[rows],
+  v_query = toupper(substr(aligned$sequence_alignment[rows], 1L, left[rows])),
+  v_ref = toupper(substr(aligned$germline_alignment[rows], 1L, left[rows])),
+  stringsAsFactors = FALSE)
+cat(sprintf("pooled %d heavy sequences with a V side from the aligned table\n", nrow(pool)))
 if (nrow(pool) < min_sequences) {
   finish("reference", sprintf("%d heavy sequences with alignments, below the %d TIgGER needs to tell a novel allele from noise",
                               nrow(pool), min_sequences))
 }
-
-# The germline database, derived: a row's germline before the junction is the allele
-# it was called against. Per allele the longest is kept, as shorter reads give prefixes.
-
-# Columns of `g` with a germline base, up to the junction start in `s`. NULL if no junction.
-v_columns <- function(s, g, junction) {
-  sc <- strsplit(s, "")[[1]]
-  gc <- strsplit(g, "")[[1]]
-  if (length(sc) != length(gc)) return(NULL)
-  bases <- which(!(sc %in% GAP))
-  if (!length(bases)) return(NULL)
-  at <- regexpr(toupper(junction), toupper(paste(sc[bases], collapse = "")), fixed = TRUE)
-  if (at < 0) return(NULL)
-  from <- bases[at]
-  if (from <= 1) return(integer(0))
-  cols <- seq_len(from - 1)
-  cols[gc[cols] != "-"]
-}
-
-# Query and germline over those columns, as two equal-length strings.
-v_pair <- function(s, g, junction) {
-  cols <- v_columns(s, g, junction)
-  if (is.null(cols) || !length(cols)) return(c(NA_character_, NA_character_))
-  c(paste(strsplit(s, "")[[1]][cols], collapse = ""),
-    paste(strsplit(g, "")[[1]][cols], collapse = ""))
-}
-
 pool$allele <- allele_of(pool$v_call)
-pair <- mapply(v_pair, pool$sequence_alignment, pool$germline_alignment,
-               pool$junction, USE.NAMES = FALSE)
-pool$v_query <- pair[1, ]
-pool$v_ref <- pair[2, ]
-rm(pair)
+
 # Too short a stretch of germline to tell one allele of a gene from another.
-v_germline <- ifelse(!is.na(pool$v_ref) & nchar(pool$v_ref) >= 30, pool$v_ref, NA_character_)
-readable <- present(v_germline)
+readable <- nchar(pool$v_ref) >= 30L
 if (sum(readable) < min_sequences) {
-  finish("reference", sprintf("only %d of %d sequences have a germline that can be read up to the junction, below the %d needed",
+  finish("reference", sprintf("only %d of %d sequences have 30 or more germline bases before the junction, below the %d needed",
                               sum(readable), nrow(pool), min_sequences))
 }
 
-# One sequence per allele. Rows that disagree beyond a prefix are not on one numbering.
-by_allele <- split(v_germline[readable], pool$allele[readable])
+# Left-padded to one width, so position i is the same distance from the junction in every row.
+width <- max(nchar(pool$v_ref[readable]))
+pad_left <- function(x) paste0(strrep(".", width - nchar(x)), x)
+
+# The germline database, derived: a row's V germline is the allele it was called against.
+# Per allele the longest is kept; shorter reads cover less of its 5' end.
+by_allele <- split(pool$v_ref[readable], pool$allele[readable])
 germline_db <- vapply(by_allele, function(v) v[which.max(nchar(v))], character(1))
-prefix_agrees <- function(a, b) {
+# Rows that disagree with their allele where both have bases are not on one numbering.
+suffix_agrees <- function(a, b) {
   n <- min(nchar(a), nchar(b))
-  n >= 30 && identical(substr(a, 1, n), substr(b, 1, n))
+  n >= 30 && identical(substr(a, nchar(a) - n + 1L, nchar(a)), substr(b, nchar(b) - n + 1L, nchar(b)))
 }
 conflicts <- vapply(names(by_allele), function(a) {
-  sum(!vapply(by_allele[[a]], prefix_agrees, logical(1), germline_db[[a]]))
+  sum(!vapply(by_allele[[a]], suffix_agrees, logical(1), germline_db[[a]]))
 }, integer(1))
-# Logged only: a span far below ~312 IMGT positions shifts TIgGER's position logic.
 span <- nchar(germline_db)
-cat(sprintf("V span in germline positions: median %d, range %d to %d (a full length V is about 312)\n",
+cat(sprintf("V germline bases before the junction, per allele: median %d, range %d to %d\n",
             as.integer(median(span)), min(span), max(span)))
 cat(sprintf("germline database derived from the data: %d allele(s) over %d gene(s), %d of %d sequences disagree with their own allele\n",
             length(germline_db), length(unique(gene_of(names(germline_db)))),
@@ -190,14 +143,12 @@ if (length(germline_db) < 2) {
   finish("reference", "fewer than two V alleles were called, so there is nothing to tell apart")
 }
 
-# TIgGER reads short germlines as empty positions, so pad all to one width with IMGT
-# gaps and scan that width (not a fixed 312), less the 3' margin.
-width <- max(nchar(germline_db))
+# TIgGER reads "." as an empty position, so a germline short at its 5' end is padded there.
+# The scan stops short of the junction by the 3' margin.
 short <- sum(nchar(germline_db) < width)
-germline_db <- vapply(germline_db, function(g) paste0(g, strrep(".", width - nchar(g))),
-                      character(1))
+germline_db <- vapply(germline_db, pad_left, character(1))
 pos_range <- seq_len(width - THREE_PRIME_MARGIN)
-cat(sprintf("germlines squared off to %d positions (%d of %d were shorter); scanning positions 1 to %d\n",
+cat(sprintf("germlines aligned at the junction over %d positions (%d of %d shorter at the 5' end); scanning positions 1 to %d\n",
             width, short, length(germline_db), max(pos_range)))
 
 # Genotyping needs genes with several called alleles. A `*00` library gives one per
@@ -212,13 +163,15 @@ if (max(per_gene) == 1) {
               median(per_gene), max(per_gene), unresolved, length(germline_db)))
 }
 
+# The V alone, aligned at the junction and padded past its end: TIgGER's 312 cut then
+# ends in padding every row shares rather than in the CDR3.
 db <- data.frame(
-  sequence_id = paste(pool$src, pool$row, sep = ":"),
+  sequence_id = pool$id,
   v_call = pool$v_call,
   j_call = pool$j_call,
   junction = pool$junction,
   junction_length = nchar(pool$junction),
-  sequence_alignment = pool$sequence_alignment,
+  sequence_alignment = paste0(pad_left(pool$v_query), strrep(".", max(0L, IMGT_V_LENGTH - width))),
   stringsAsFactors = FALSE)
 
 # Input shape, logged to help debug runs killed inside `findNovelAlleles`.
@@ -298,23 +251,20 @@ if (inherits(reassigned, "error")) {
 if (!"v_call_genotyped" %in% names(reassigned)) {
   finish("reference", "TIgGER returned no v_call_genotyped, so nothing was reassigned")
 }
-new_call <- reassigned$v_call_genotyped[match(db$sequence_id, reassigned$sequence_id)]
+new_call <- reassigned$v_call_genotyped[match(pool$id, reassigned$sequence_id)]
 kept <- present(new_call) & !is.na(new_call)
 # Offered: rows whose new allele differs from the original one.
 offered <- kept & allele_of(new_call) != allele_of(pool$v_call)
 cat(sprintf("TIgGER: %d of %d heavy sequences reassigned, %d offered a different allele, %d given back the allele they had\n",
             sum(kept), nrow(db), sum(offered), sum(kept & !offered)))
 
-# The germline follows the call: only V columns with a germline base are rewritten.
-# Junction and J are left alone.
-rewrite_germline <- function(s, g, junction, allele) {
-  cols <- v_columns(s, g, junction)
-  if (is.null(cols) || !length(cols)) return(g)
-  gc <- strsplit(g, "")[[1]]
-  ac <- strsplit(allele, "")[[1]]
-  n <- min(length(cols), length(ac))
-  gc[cols[seq_len(n)]] <- ac[seq_len(n)]
-  paste(gc, collapse = "")
+# The germline follows the call over the row's own V side, counted from the junction.
+# Where the allele is not known that far 5', the row keeps its own base. Junction and J stay.
+follow_allele <- function(own, allele) {
+  a <- strsplit(substr(allele, width - nchar(own) + 1L, width), "")[[1]]
+  o <- strsplit(own, "")[[1]]
+  a[a == "."] <- o[a == "."]
+  paste(a, collapse = "")
 }
 
 # Mismatches per row, counting only columns where both sides have A, C, G or T.
@@ -346,17 +296,12 @@ cross_gene <- usable_call & gene_of(new_call) != gene_of(pool$v_call)
 # A reassignment must also bring the sequence strictly closer to its germline; a tie
 # keeps the original call. Needed because the genotype can leave a gene with only
 # distant novel alleles.
-# The V germline `rewrite_germline` would produce, computed without running it.
 proposed <- rep(NA_character_, nrow(pool))
-comparable <- which(usable_call & !is.na(pool$v_ref))
-allele_seq <- unname(genotype_db[allele_of(new_call[comparable])])
-head_len <- pmin(nchar(pool$v_ref[comparable]), nchar(allele_seq))
-proposed[comparable] <- ifelse(is.na(allele_seq), NA_character_,
-  paste0(substr(allele_seq, 1L, head_len),
-         substr(pool$v_ref[comparable], head_len + 1L, nchar(pool$v_ref[comparable]))))
+comparable <- which(usable_call)
+proposed[comparable] <- mapply(follow_allele, pool$v_ref[comparable],
+                               unname(genotype_db[allele_of(new_call[comparable])]), USE.NAMES = FALSE)
 mut_before <- mismatches(pool$v_query, pool$v_ref)
 mut_after <- mismatches(pool$v_query, proposed)
-rm(proposed, allele_seq, head_len)
 not_closer <- usable_call & !cross_gene & !is.na(mut_before) & !is.na(mut_after) &
               mut_after >= mut_before
 
@@ -370,63 +315,17 @@ if (any(not_closer)) {
   say("%d of the offered sequences keep their original call: the allele the genotype offered sits no closer to them than the one they were called against, so the reassignment would have added mutations rather than removed them (%d V mutations against %d)\n",
       sum(not_closer), sum(mut_after[not_closer]), sum(mut_before[not_closer]))
 }
-# Applies one source's reassignments to the table it came from.
-apply_to <- function(target, mine) {
-  rows <- pool$row[mine]
-  before <- target$germline_alignment[rows]
-  target$germline_alignment[rows] <- mapply(rewrite_germline,
-                                            target$sequence_alignment[rows], before,
-                                            target$junction[rows],
-                                            genotype_db[allele_of(new_call[mine])],
-                                            USE.NAMES = FALSE)
-  target$v_call[rows] <- new_call[mine]
-  list(table = target, rewritten = length(rows),
-       moved = sum(before != target$germline_alignment[rows]))
-}
-
-rewritten <- 0L
-moved <- 0L
-by_source <- split(take, pool$src[take])
-
-if (!is.null(by_source[["0"]])) {
-  done <- apply_to(clono, by_source[["0"]])
-  clono <- done$table
-  rewritten <- rewritten + done$rewritten
-  moved <- moved + done$moved
-}
-
-# One AIRR file at a time. Files with no reassignment are copied as is.
-say("writing %d AIRR file(s) back\n", length(airr_names))
-ensure_out_airr()
-for (k in seq_along(airr_names)) {
-  n <- airr_names[k]
-  mine <- by_source[[as.character(k)]]
-  if (is.null(mine)) {
-    if (!is.null(out_airr_dir)) file.copy(airr_path(n), out_airr_path(n), overwrite = TRUE)
-    next
-  }
-  done <- apply_to(read_tsv(airr_path(n)), mine)
-  if (!is.null(out_airr_dir)) write_tsv(done$table, out_airr_path(n))
-  rewritten <- rewritten + done$rewritten
-  moved <- moved + done$moved
-  rm(done)
-  invisible(gc())
-}
-
-# The align stage joins AIRR rows to clonotypes on V gene, J gene and junction, so a
-# clonotype takes its AIRR row's new call. Clonotypes with their own alignment are skipped.
-if (length(airr_names)) {
-  from_airr <- take[pool$src[take] != 0L]
-  key <- paste(gene_of(pool$v_call[from_airr]), gene_of(pool$j_call[from_airr]),
-               pool$junction[from_airr], sep = "\r")
-  clono_key <- paste(gene_of(clono$v_call), gene_of(clono$j_call), clono$junction, sep = "\r")
-  hit <- match(clono_key, key)
-  hit[pool$row[pool$src == 0L]] <- NA
-  at <- which(!is.na(hit))
-  clono$v_call[at] <- new_call[from_airr][hit[at]]
-  cat(sprintf("%d clonotype rows take their AIRR row's new call, so the alignment join still matches\n",
-              length(at)))
-}
+# The V side of each taken row's germline is replaced; the rest of the row is untouched.
+rows_taken <- pool$row[take]
+before <- aligned$germline_alignment[rows_taken]
+aligned$germline_alignment[rows_taken] <- paste0(
+  proposed[take], substr(before, left[rows_taken] + 1L, nchar(before)))
+aligned$v_call[rows_taken] <- new_call[take]
+rewritten <- length(take)
+moved <- sum(before != aligned$germline_alignment[rows_taken])
+# The clonotype table names the call too, for the tree step and the node tables.
+at <- match(pool$sequence_id[take], clono$sequence_id)
+clono$v_call[at[!is.na(at)]] <- new_call[take][!is.na(at)]
 
 cat(sprintf("germlines rewritten on the V side for %d rows, %d of them changed, %d moved gene\n",
             rewritten, moved, changed_gene))

@@ -803,7 +803,7 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   .output("allelesProgress", (ctx) => stageProgress(ctx.outputs, "allelesLogs"))
   /** Per donor, the route the allele stage took, "tigger" or "reference", and why. */
   .output("alleleRoutes", (ctx) => donorMap(ctx.outputs, "alleleRoutes", readAlleleRoute))
-  // Alignment shows as part of clustering; its log is read only for liveness.
+  // Alignment shows as part of allele inference; its log is read only for liveness.
   .output("alignmentsLogs", (ctx) => stageLogs(ctx.outputs, "alignmentsLogs"))
   .output("clusteringLogs", (ctx) => stageLogs(ctx.outputs, "clusteringLogs"))
   .output("clusteringProgress", (ctx) => stageProgress(ctx.outputs, "clusteringLogs"))

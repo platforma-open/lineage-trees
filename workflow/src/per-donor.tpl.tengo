@@ -206,7 +206,7 @@ self.body(func(inputs) {
 				mem("4GiB").
 				cpu(1).
 				addFile("input.clns", entry.file).
-				arg("exportAirr").arg("--imgt-gaps").
+				arg("exportAirr").
 				arg("input.clns").arg("airr.tsv").
 				saveFile("airr.tsv").
 				printErrStreamToStdout().
@@ -214,52 +214,8 @@ self.body(func(inputs) {
 			airrFiles = append(airrFiles, { name: entry.name + ".tsv", file: airr.getFile("airr.tsv") })
 		}
 
-		// Rewrites both the clonotype table and the AIRR exports with the donor's alleles.
-
-		alleles := exec.builder().
-			software(allelesSw).
-			resources({
-				onCPU: {
-					cpu: 4,
-					ram: f.size("alleleInput").times(20).plus(f.gib(2)).
-						between(f.gib(4), f.gib(32)).staticFallback(f.gib(8))
-				}
-			}).
-			addFile("clonotypes.tsv", clonotypes, { tag: "alleleInput" }).
-			// Separate output name: added files are read-only in the working directory.
-			arg("--clonotypes").arg("clonotypes.tsv").
-			arg("--out").arg("with-alleles.tsv").
-			arg("--out-route").arg("route.json").
-			arg("--threads").arg("4").
-			saveFile("with-alleles.tsv").
-			saveFileContent("route.json").
-			saveStdoutStream().
-			printErrStreamToStdout()
-		if len(airrFiles) > 0 {
-			alleles.arg("--airr-dir").arg("airr").arg("--out-airr-dir").arg("airr-alleles")
-			for airr in airrFiles {
-				alleles.addFile("airr/" + airr.name, airr.file, { tag: "alleleInput" }).
-					saveFile("airr-alleles/" + airr.name)
-			}
-		}
-		allelesRun := alleles.run()
-		allelesLogs.add([groupName(i)], allelesRun.getStdoutStream())
-		clonotypes = allelesRun.getFile("with-alleles.tsv")
-		alleleRoutes.add([groupName(i)], allelesRun.getFileContent("route.json"))
-
-		correctedAirr := []
-		for airr in airrFiles {
-			correctedAirr = append(correctedAirr, {
-				path: "airr/" + airr.name,
-				file: allelesRun.getFile("airr-alleles/" + airr.name)
-			})
-		}
-		airrFiles = correctedAirr
-
-		collectCmd.addFile("clonotypes/" + suffix, clonotypes)
-
-		// Join alignments (AIRR exports or upstream columns) before clustering: HILARy
-		// adaptive reads mutations off the same alignments the trees use.
+		// Join alignments (AIRR exports or upstream columns) and rebuild every row around its
+		// junction, first: allele inference, HILARy adaptive and the trees all read these rows.
 		alignStage := exec.builder().
 			software(immcantationSw).
 			resources({
@@ -276,6 +232,7 @@ self.body(func(inputs) {
 			arg("--out-aligned").arg("aligned.tsv").
 			arg("--out-log").arg("align.log").
 			saveFile("aligned.tsv").
+			saveFile("align.log").
 			saveStdoutStream().
 			printErrStreamToStdout()
 		if params.useLightChains {
@@ -284,12 +241,45 @@ self.body(func(inputs) {
 		if len(airrFiles) > 0 {
 			alignStage.arg("--airr-dir").arg("airr")
 			for airr in airrFiles {
-				alignStage.addFile(airr.path, airr.file)
+				alignStage.addFile("airr/" + airr.name, airr.file)
 			}
 		}
 		alignedRun := alignStage.run()
 		alignmentsLogs.add([groupName(i)], alignedRun.getStdoutStream())
-		alignedTable := alignedRun.getFile("aligned.tsv")
+
+		// Rewrites the aligned rows' V germlines and the clonotype calls with the donor's alleles.
+		alleles := exec.builder().
+			software(allelesSw).
+			resources({
+				onCPU: {
+					cpu: 4,
+					ram: f.size("alleleInput").times(20).plus(f.gib(2)).
+						between(f.gib(4), f.gib(32)).staticFallback(f.gib(8))
+				}
+			}).
+			addFile("clonotypes.tsv", clonotypes, { tag: "alleleInput" }).
+			addFile("aligned.tsv", alignedRun.getFile("aligned.tsv"), { tag: "alleleInput" }).
+			addFile("align.log", alignedRun.getFile("align.log")).
+			// Separate output names: added files are read-only in the working directory.
+			arg("--clonotypes").arg("clonotypes.tsv").
+			arg("--aligned").arg("aligned.tsv").
+			arg("--align-log").arg("align.log").
+			arg("--out").arg("with-alleles.tsv").
+			arg("--out-aligned").arg("aligned-alleles.tsv").
+			arg("--out-route").arg("route.json").
+			arg("--threads").arg("4").
+			saveFile("with-alleles.tsv").
+			saveFile("aligned-alleles.tsv").
+			saveFileContent("route.json").
+			saveStdoutStream().
+			printErrStreamToStdout()
+		allelesRun := alleles.run()
+		allelesLogs.add([groupName(i)], allelesRun.getStdoutStream())
+		clonotypes = allelesRun.getFile("with-alleles.tsv")
+		alleleRoutes.add([groupName(i)], allelesRun.getFileContent("route.json"))
+		alignedTable := allelesRun.getFile("aligned-alleles.tsv")
+
+		collectCmd.addFile("clonotypes/" + suffix, clonotypes)
 
 		// HILARy's pairwise test is quadratic per class, so it gets every core.
 		// RAM is unmeasured on deep repertoires; the floor is generous on purpose.

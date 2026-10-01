@@ -113,9 +113,9 @@ export function useDonorRows() {
       };
 
       const progress: Record<Stage, StageProgress> = {
-        alleles: stage("alleles", false, "Inferring alleles"),
-        // Joining alignments is plumbing for clustering, so it shows as clustering.
-        clustering: stage("clustering", handle("alignments") !== undefined, "Lineage clustering"),
+        // Alignments are joined first and allele inference reads them, so joining shows here.
+        alleles: stage("alleles", handle("alignments") !== undefined, "Joining alignments"),
+        clustering: stage("clustering", done("alleles"), "Lineage clustering"),
         trees: stage("trees", done("clustering"), "Starting"),
         results: results(),
       };
