@@ -85,9 +85,6 @@ catalogs:
       specifier: 3.5.24
       version: 3.5.24
 
-overrides:
-  '@platforma-open/milaboratories.runenv-r-lineage-trees': link:/home/mchernys/projects/MiLaboratories/mictx/support/runenv-r-lineage-trees
-
 importers:
 
   .:
@@ -215,9 +212,6 @@ importers:
       '@platforma-open/milaboratories.runenv-python-3':
         specifier: 'catalog:'
         version: 1.13.0
-      '@platforma-open/milaboratories.runenv-r-lineage-trees':
-        specifier: link:/home/mchernys/projects/MiLaboratories/mictx/support/runenv-r-lineage-trees
-        version: link:../../../../support/runenv-r-lineage-trees
       '@platforma-sdk/block-tools':
         specifier: 'catalog:'
         version: 2.16.5(@types/node@26.6.2)

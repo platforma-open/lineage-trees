@@ -15,30 +15,11 @@
   },
   "devDependencies": {
     "@platforma-open/milaboratories.runenv-python-3": "catalog:",
-    "@platforma-open/milaboratories.runenv-r-lineage-trees": "catalog:",
     "@platforma-sdk/block-tools": "catalog:"
   },
   "block-software": {
-    "artifacts": {
-      "r-archive": {
-        "type": "R",
-        "registry": "platforma-open",
-        "environment": "@platforma-open/milaboratories.runenv-r-lineage-trees:main",
-        "root": "./context"
-      }
-    },
     "entrypoints": {
       "main": {
-        "binary": {
-          "artifact": "r-archive",
-          "cmd": [
-            "Rscript",
-            "{pkg}/trees.R"
-          ],
-          "envVars": [
-            "R_GC_MEM_GROW=3"
-          ]
-        },
         "docker": {
           "artifact": {
             "type": "docker",
@@ -52,16 +33,6 @@
         }
       },
       "alleles": {
-        "binary": {
-          "artifact": "r-archive",
-          "cmd": [
-            "Rscript",
-            "{pkg}/alleles.R"
-          ],
-          "envVars": [
-            "R_GC_MEM_GROW=3"
-          ]
-        },
         "docker": {
           "artifact": {
             "type": "docker",

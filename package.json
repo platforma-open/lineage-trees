@@ -30,10 +30,5 @@
     "oxfmt": "*",
     "oxlint": "*"
   },
-  "packageManager": "pnpm@9.12.0",
-  "pnpm": {
-    "overrides": {
-      "@platforma-open/milaboratories.runenv-r-lineage-trees": "link:/home/mchernys/projects/MiLaboratories/mictx/support/runenv-r-lineage-trees"
-    }
-  }
+  "packageManager": "pnpm@9.12.0"
 }
