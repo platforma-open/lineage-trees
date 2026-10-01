@@ -194,6 +194,17 @@ def main(tmp: Path) -> None:
     ok("and its clonotype count and abundance are unchanged",
        got.loc["1", "clonotype_count"] == 2 and got.loc["1", "abundance"] == 5.0)
 
+    # HILARy's pool pickles the seeded simulation by name; a worker must find the seeded one,
+    # or every worker dies unpickling and the pool respawns them forever.
+    import pickle
+    namespace = {}
+    exec(cluster.HILARY_SEEDING, namespace)
+    from hilary import inference
+    method = object.__new__(inference.HILARy).simulate_xs_ys
+    back = pickle.loads(pickle.dumps(method))
+    ok("the seeded HILARy simulation survives the pool's pickling",
+       getattr(back, "__wrapped__", None) is namespace["simulate"])
+
     # Run id: row order must not change it, membership must.
     members = pd.DataFrame({"sequence_id": ["a", "b"], "lineage_id": ["L1", "L1"]})
     tree = pd.DataFrame({"lineage_id": ["L1"], "node_id": ["1"], "parent_id": [""], "label": ["a"]})

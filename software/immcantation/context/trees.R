@@ -1009,13 +1009,16 @@ rethreshold_raxml <- function(built, dir, run_id) {
 # Tree pool: fresh R sessions, not forks (a fork's GC touches the whole parent heap),
 # fed lineages as they free up. Workers return node rows, not trees, to save memory.
 
+# IgPhyML and RAxML pick a seed from the clock unless given one; Dowser defaults RAxML to 28.
+TREE_SEED <- 0L
+
 attempt_build <- function(build, p, on, nproc) {
   if (!nrow(on)) return(simpleError("no eligible lineages"))
   tryCatch(
     if (build == "igphyml") {
       # Also buildIgphyml's default; named to show the shared threshold.
       getTrees(on, build = "igphyml", exec = igphyml, nproc = nproc, quiet = 1,
-               partition = p, asrc = ASR_CREDIBLE_MASS)
+               partition = p, asrc = ASR_CREDIBLE_MASS, rseed = TREE_SEED)
     } else if (build == "raxml") {
       # Dowser deletes RAxML's working files, which hold the marginals, so use our own dir.
       run_id <- "lt"
@@ -1023,7 +1026,7 @@ attempt_build <- function(build, p, on, nproc) {
       on.exit(unlink(dir, recursive = TRUE), add = TRUE)
       rethreshold_raxml(
         getTrees(on, build = "raxml", exec = raxml, nproc = nproc, quiet = 1,
-                 partition = p, dir = dir, id = run_id, rm_temp = FALSE),
+                 partition = p, dir = dir, id = run_id, rm_temp = FALSE, rseed = TREE_SEED),
         dir, run_id)
     } else {
       getTrees(on, build = "pratchet", nproc = nproc, quiet = 1)
@@ -1288,6 +1291,8 @@ route_lineage <- function(u) {
 
 # One lineage's worker job; output, warnings and messages are captured and returned.
 process_unit <- function(u) {
+  # Parsimony and its random resolution draw from R's RNG; a worker's own seed is the clock's.
+  set.seed(lineage_seed(u$lid))
   out <- NULL
   # formatClones warns per call about stop-codon removals; sum the counts instead.
   stops <- 0L
@@ -1312,6 +1317,7 @@ process_unit <- function(u) {
 POOL_EXPORTS <- c("attempt_build", "usable_build", "why_build", "build_lineage",
                   "collapse_tree", "tree_rows", "finish_lineage", "process_unit",
                   "route_lineage", "format_lineages", "partition_for", "chain", "HEAVY",
+                  "lineage_seed", "TREE_SEED",
                   "min_tips",
                   "rethreshold_raxml", "iupac_from_probs", "igphyml", "raxml",
                   "ASR_CREDIBLE_MASS", "IUPAC_BY_MASK", "UNAMBIGUOUS", "BUILDER_LABEL",

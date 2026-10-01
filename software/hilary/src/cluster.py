@@ -108,6 +108,34 @@ HILARY_COMMANDS = {
 }
 
 
+# HILARy has no seed option. Its adaptive methods subsample large classes in the parent and
+# simulate null distributions per class in forked workers, which share the parent's state and
+# take classes in whatever order they free up. So the parent is seeded, and each class's
+# simulation is seeded by its class id.
+HILARY_SEED = 0
+HILARY_SEEDING = f"""
+import functools
+import zlib
+import numpy as np
+from hilary import inference
+
+simulate = inference.HILARy.simulate_xs_ys
+
+# Wrapped, so the pool pickles it by its own name and workers find the seeded one.
+@functools.wraps(simulate)
+def seeded(self, args):
+    np.random.seed(({HILARY_SEED} + zlib.crc32(str(args[-1]).encode())) % 2**32)
+    return simulate(self, args)
+
+inference.HILARy.simulate_xs_ys = seeded
+np.random.seed({HILARY_SEED})
+"""
+HILARY_BOOTSTRAP = HILARY_SEEDING + """
+from hilary.__main__ import app
+app(prog_name="hilary")
+"""
+
+
 def run_hilary(
     input_tsv: Path,
     work_dir: Path,
@@ -124,8 +152,8 @@ def run_hilary(
     command_name, output_prefix = HILARY_COMMANDS[method]
     command = [
         sys.executable,
-        "-m",
-        "hilary",
+        "-c",
+        HILARY_BOOTSTRAP,
         command_name,
         str(input_tsv),
         "--result-folder",
