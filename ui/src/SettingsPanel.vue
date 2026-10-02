@@ -12,6 +12,7 @@ import {
   PlDropdownMultiRef,
   PlDropdownRef,
   PlNumberField,
+  PlRow,
 } from "@platforma-sdk/ui-vue";
 import { computed, ref } from "vue";
 import { useApp } from "./app";
@@ -56,6 +57,8 @@ const hasMixcr = computed(() => datasets.value.some((d) => d.alignmentRoute === 
 const anchorOptions = computed(() => datasets.value.map((d) => ({ ref: d.ref, label: d.label })));
 const outsideDonor = computed(() => app.model.outputs.datasetsOutsideDonorColumn ?? []);
 const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
+// View state, so closing the note is not a block edit; it shows again when the panel reopens.
+const adaptiveNoteOpen = ref(true);
 </script>
 
 <template>
@@ -118,12 +121,22 @@ const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
         label="Clustering"
       >
         <template #tooltip>
-          Fixed threshold: single linkage on heavy-chain CDR3 within each V, J and CDR3-length
-          class, at the threshold above. Adaptive: HILARy infers a threshold per class for the
-          requested precision and sensitivity.
+          How clonotypes are grouped into lineages. Only clonotypes with the same V gene, J gene and
+          CDR3 length are compared.
+          <br /><br />
+          <b>Fixed threshold</b>: two clonotypes join one lineage when their heavy-chain CDR3s are
+          closer than the Clustering threshold below. <br /><br />
+          <b>Adaptive</b>: HILARy picks a threshold for each group from the data itself, aiming at
+          the Precision and Sensitivity below. When alignments are available it also uses mutations
+          the clonotypes share outside the CDR3.
         </template>
       </PlDropdown>
-      <PlAlert v-if="app.model.data.clusteringMode === 'adaptive'" type="warn">
+      <PlAlert
+        v-if="app.model.data.clusteringMode === 'adaptive'"
+        v-model="adaptiveNoteOpen"
+        type="warn"
+        closeable
+      >
         HILARy's adaptive mode is calibrated on human repertoires; on other species prefer the fixed
         threshold.
       </PlAlert>
@@ -136,11 +149,13 @@ const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
         :step="0.01"
       >
         <template #tooltip>
-          Fraction of a CDR3's length below which two clonotypes are single-linked into one lineage.
-          HILARy's default is 0.2.
+          How different two heavy-chain CDR3s may be and still belong to one lineage, as a share of
+          the CDR3's length: at 0.2 they join when no more than about 20% of their positions differ.
+          Lower values give smaller, stricter lineages; higher values join more distant relatives
+          but risk joining unrelated clonotypes. 0.2 is HILARy's default.
         </template>
       </PlNumberField>
-      <template v-if="app.model.data.clusteringMode === 'adaptive'">
+      <PlRow v-if="app.model.data.clusteringMode === 'adaptive'">
         <PlNumberField
           v-model="app.model.data.precision"
           label="Precision"
@@ -149,8 +164,9 @@ const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
           :step="0.01"
         >
           <template #tooltip>
-            The share of pairs placed in one lineage that HILARy aims to have truly related. Its
-            default is 0.99.
+            How cautious the grouping is: of all the clonotype pairs put in the same lineage, the
+            share that should really be related. Raise it to keep lineages pure, at the cost of
+            splitting some real ones. The default is 0.99.
           </template>
         </PlNumberField>
         <PlNumberField
@@ -161,11 +177,12 @@ const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
           :step="0.01"
         >
           <template #tooltip>
-            The share of truly related pairs that HILARy aims to place in one lineage. Its default
-            is 0.9.
+            How complete the grouping is: of all the truly related clonotype pairs, the share that
+            should end up in the same lineage. Raise it to keep real lineages together, at the cost
+            of joining in some unrelated clonotypes. The default is 0.9.
           </template>
         </PlNumberField>
-      </template>
+      </PlRow>
       <PlDropdown v-model="app.model.data.igPhyMLScope" :options="igPhyMLOptions" label="IgPhyML">
         <template #tooltip>
           Which lineages IgPhyML builds instead of FastTree and RAxML. Its HLP19 codon model

@@ -8,7 +8,9 @@ import SOIPage from "./soi/SOIPage.vue";
 import TreePage from "./TreePage.vue";
 import TreesPage from "./TreesPage.vue";
 
-export const sdkPlugin = defineAppV3(platforma, () => ({
+export const sdkPlugin = defineAppV3(platforma, (app) => ({
+  // The green bar while the block runs.
+  progress: () => app.model.outputs.isRunning,
   routes: {
     "/": () => MainPage,
     "/expansion": () => ExpansionPlotPage,

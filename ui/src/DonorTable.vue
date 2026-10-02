@@ -91,8 +91,12 @@ const gridOptions: GridOptions<DonorRow> = {
 
 const loadingOverlayParams = computed(() =>
   app.model.outputs.isRunning
-    ? { variant: "running" as const, runningText: "Starting" }
+    ? { variant: "running" as const, runningText: "Loading donor list" }
     : { variant: "not-ready" as const },
+);
+// No rows yet: the grid shows its loading overlay, not "Empty", until a run lists its donors.
+const rowData = computed(() =>
+  donorRows.value.length === 0 && !app.model.outputs.runFinished ? undefined : donorRows.value,
 );
 </script>
 
@@ -100,7 +104,7 @@ const loadingOverlayParams = computed(() =>
   <AgGridVue
     :theme="AgGridTheme"
     :style="{ height: '100%' }"
-    :rowData="donorRows"
+    :rowData="rowData"
     :defaultColDef="defaultColDef"
     :columnDefs="columnDefs"
     :grid-options="gridOptions"

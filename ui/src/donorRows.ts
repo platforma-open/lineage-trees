@@ -68,8 +68,13 @@ export function useDonorRows() {
     const collectLog = out.collectLog;
     const isRunning = out.isRunning === true;
     const stats = new Map((out.donorStats ?? []).map((s) => [s.donor, s]));
+    // The run's donors are known from its args, so rows show before any stage starts.
     const donors = [
-      ...new Set([...Object.values(logs).flatMap((m) => [...m.keys()]), ...stats.keys()]),
+      ...new Set([
+        ...(out.expectedDonors ?? []),
+        ...Object.values(logs).flatMap((m) => [...m.keys()]),
+        ...stats.keys(),
+      ]),
     ].sort();
     const allTreesDone = donors.every((d) => {
       const h = logs.trees.get(d);

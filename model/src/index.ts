@@ -195,6 +195,9 @@ export type AlignmentSource = "mixcr" | "upstream" | "none";
 /** Per donor group, what the overview shows beside its progress. */
 export type DonorStats = { donor: string; clonotype_count: number; lineage_count: number };
 
+/** The group a run without a donor column clusters as; the workflow names it the same. */
+export const SINGLE_GROUP = "all samples";
+
 /** Picked datasets with samples lacking a donor value, and whether no sample has one. */
 export type SamplesWithoutDonor = {
   datasets: { dataset: string; missing: number; total: number }[];
@@ -332,6 +335,43 @@ const collectStream = (outputs: TreeNodeAccessor | undefined) =>
 
 const readAlleleRoute = (acc: TreeNodeAccessor) =>
   acc.getDataAsJson<{ route: string; reason: string }>();
+/** A donor value as the workflow names it: tabs and newlines to spaces, trimmed; blank is none. */
+function donorName(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const name = String(value)
+    .replace(/[\t\n]/g, " ")
+    .trim();
+  return name === "" ? undefined : name;
+}
+
+/**
+ * Each picked dataset on the donor column's samples, with every sample's donor name, cleaned
+ * as the workflow cleans it (tabs and newlines to spaces, trimmed); undefined for no value or a
+ * blank one. Datasets on another sample axis are left out (see datasetsOutsideDonorColumn).
+ * Undefined while the donor column or a dataset's samples are not readable.
+ */
+function donorsOfSamples(
+  pool: ResultPool,
+  donorRef: PlRef,
+  refs: PlRef[],
+): { ref: PlRef; donors: (string | undefined)[] }[] | undefined {
+  const donor = pool.getPColumnByRef(donorRef);
+  const donorAxis = donor?.spec.axesSpec[0];
+  const values = donor?.data?.getDataAsJsonOrUndefined<{ data?: Record<string, unknown> }>()?.data;
+  if (donorAxis === undefined || values === undefined) return undefined;
+  const nameOf = (sample: string) => donorName(values[JSON.stringify([sample])]);
+  const donorKey = axisKey(donorAxis);
+  const out: { ref: PlRef; donors: (string | undefined)[] }[] = [];
+  for (const ref of canonicalRefs(refs)) {
+    const column = pool.getPColumnByRef(ref);
+    if (column === undefined || axisKey(column.spec.axesSpec[0]) !== donorKey) continue;
+    const samples = getUniquePartitionKeys(column.data)?.[0];
+    if (samples === undefined) return undefined;
+    out.push({ ref, donors: samples.map((s) => nameOf(String(s))) });
+  }
+  return out;
+}
+
 const readClusteringMethod = (acc: TreeNodeAccessor) =>
   acc.getDataAsJson<{ method: string; reason: string }>();
 
@@ -544,34 +584,50 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
    */
   .output("samplesWithoutDonor", (ctx): SamplesWithoutDonor | undefined => {
     if (ctx.data.donorColumn === undefined) return { datasets: [], noneNamed: false };
-    const donor = ctx.resultPool.getPColumnByRef(ctx.data.donorColumn);
-    const donorAxis = donor?.spec.axesSpec[0];
-    const values = donor?.data?.getDataAsJsonOrUndefined<{ data?: Record<string, unknown> }>()
-      ?.data;
-    if (donorAxis === undefined || values === undefined) return undefined;
-    const named = (sample: string) => {
-      const v = values[JSON.stringify([sample])];
-      return v !== undefined && v !== null && String(v).trim() !== "";
-    };
-    const donorKey = axisKey(donorAxis);
+    const perDataset = donorsOfSamples(
+      ctx.resultPool,
+      ctx.data.donorColumn,
+      ctx.data.datasets ?? [],
+    );
+    if (perDataset === undefined) return undefined;
     const labels = datasetLabels(ctx.resultPool);
-    const out: SamplesWithoutDonor["datasets"] = [];
-    let covered = 0;
-    let namedSamples = 0;
-    for (const ref of canonicalRefs(ctx.data.datasets ?? [])) {
-      const column = ctx.resultPool.getPColumnByRef(ref);
-      // Datasets on another sample axis are reported by datasetsOutsideDonorColumn.
-      if (column === undefined || axisKey(column.spec.axesSpec[0]) !== donorKey) continue;
-      const samples = getUniquePartitionKeys(column.data)?.[0];
-      if (samples === undefined) return undefined;
-      const missing = samples.filter((s) => !named(String(s))).length;
-      covered++;
-      namedSamples += samples.length - missing;
+    const datasets: SamplesWithoutDonor["datasets"] = [];
+    for (const { ref, donors } of perDataset) {
+      const missing = donors.filter((d) => d === undefined).length;
       if (missing > 0) {
-        out.push({ dataset: labels.get(refKey(ref)) ?? ref.name, missing, total: samples.length });
+        datasets.push({
+          dataset: labels.get(refKey(ref)) ?? ref.name,
+          missing,
+          total: donors.length,
+        });
       }
     }
-    return { datasets: out, noneNamed: covered > 0 && namedSamples === 0 };
+    const noneNamed =
+      perDataset.length > 0 &&
+      perDataset.every(({ donors }) => donors.every((d) => d === undefined));
+    return { datasets, noneNamed };
+  })
+
+  /**
+   * The donors the current run clusters, known from its args before any stage starts, so the
+   * Overview lists them at once, as upstream blocks list their samples. Like the workflow, every
+   * named value in the donor column is a group; one "all samples" group without a donor column.
+   * Undefined with no run, or while the donor column is not readable.
+   */
+  .output("expectedDonors", (ctx): string[] | undefined => {
+    const args = ctx.activeArgs;
+    if (args === undefined) return undefined;
+    if (args.donorColumn === undefined) return [SINGLE_GROUP];
+    const values = ctx.resultPool
+      .getPColumnByRef(args.donorColumn)
+      ?.data?.getDataAsJsonOrUndefined<{ data?: Record<string, unknown> }>()?.data;
+    if (values === undefined) return undefined;
+    const donors = new Set<string>();
+    for (const v of Object.values(values)) {
+      const name = donorName(v);
+      if (name !== undefined) donors.add(name);
+    }
+    return [...donors].sort();
   })
 
   /** What ran. Reads `activeArgs` so it matches the results on screen, not unrun edits. */
@@ -879,6 +935,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   .output("collectProgress", (ctx) => collectStream(ctx.outputs)?.getProgressLog(PROGRESS_PREFIX))
 
   .output("isRunning", (ctx) => ctx.outputs?.getIsReadyOrError() === false)
+  /** A run has finished, with or without an error: an empty table then means no donors. */
+  .output("runFinished", (ctx) => ctx.outputs?.getIsReadyOrError() === true)
 
   .sections((ctx) => {
     const trees = currentViews(ctx.data.treeViews, runIdOf(ctx.outputs)).map((v) => ({
