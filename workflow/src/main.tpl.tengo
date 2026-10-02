@@ -703,7 +703,7 @@ wf.body(func(args) {
 				valueType: "String",
 				annotations: {
 					"pl7.app/label": "Tree builder",
-					"pl7.app/description": "Which program built the tree, which decides the unit of its branch lengths: parsimony counts steps, fasttree-raxml counts substitutions per site, IgPhyML counts substitutions per codon site. A fasttree-raxml tree has FastTree's topology with RAxML's branch lengths and ancestral sequences.",
+					"pl7.app/description": "Which program built the tree, which decides the unit of its branch lengths: fasttree-raxml counts substitutions per nucleotide site, parsimony counts changes per nucleotide site of the lineage's alignment, IgPhyML counts substitutions per codon site. A fasttree-raxml tree has FastTree's topology with RAxML's branch lengths and ancestral sequences.",
 					"pl7.app/isDiscreteFilter": "true",
 					"pl7.app/discreteValues": "['fasttree-raxml', 'igphyml', 'pratchet']",
 					"pl7.app/table/orderPriority": "87000"
@@ -712,14 +712,11 @@ wf.body(func(args) {
 		}]
 	}, { splitDataAndSpec: true }))
 
-	// HLP19 counts per codon site, GTR per nucleotide site. With "anchored" scope the
-	// column mixes both; the lineage's tree builder says which applies.
-	distanceUnit := "substitutionsPerNucleotideSite"
-	if args.igPhyMLScope == "all" {
-		distanceUnit = "substitutionsPerCodonSite"
-	} else if args.igPhyMLScope == "anchored" {
-		distanceUnit = "substitutionsPerSite"
-	}
+	// FastTree and RAxML count per nucleotide site, and so does parsimony: dowser divides its
+	// changes by the germline's length. IgPhyML's HLP19 counts per codon site, and any IgPhyML
+	// scope leaves some lineages to the others (small ones, failed builds), so the column then
+	// mixes units and the lineage's tree builder says which applies.
+	distanceUnit := args.igPhyMLScope == "none" ? "substitutionsPerNucleotideSite" : "substitutionsPerSite"
 	// Run-level: one formatClones call covers the run, so heavy-only lineages get a masked light half.
 	chainSet := useLightChains ? "heavy-light" : "heavy"
 

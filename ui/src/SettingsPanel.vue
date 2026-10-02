@@ -62,6 +62,9 @@ const adaptiveNoteOpen = ref(true);
 </script>
 
 <template>
+  <PlAlert v-if="app.model.outputs.settingsProblem" type="warn">
+    {{ app.model.outputs.settingsProblem }}
+  </PlAlert>
   <PlDropdownRef
     v-model="app.model.data.donorColumn"
     :options="app.model.outputs.donorOptions"

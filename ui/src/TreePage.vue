@@ -120,8 +120,9 @@ const defaultOptions = computed(
     ] as PredefinedGraphOption<"dendro">[],
 );
 
-// Paths are resolved on click so the path page only reads. GraphMaker's dendrogram passes no
-// node id yet (`info[0].id` off `rawIndexes` is always undefined), so this errors until fixed.
+// Paths are resolved on click so the path page only reads. graph-maker 1.10.0 turns the clicked
+// row index into that row's values before the tooltip emits `info[0].id`; if a build passes no
+// id, the user is told so here rather than nothing happening.
 const pathError = ref<string | undefined>();
 // The page is reused across trees, so an error belongs to the tree it was raised on.
 watch(

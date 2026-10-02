@@ -567,6 +567,12 @@ lineage_ids <- unique(resolved$lineage_id)
 surrogate <- setNames(paste0("L", seq_along(lineage_ids)), lineage_ids)
 real_lineage <- setNames(lineage_ids, surrogate)
 resolved$lineage_key <- surrogate[resolved$lineage_id]
+# Clonotype ids get flat surrogates too: the tree files rewrite ":", ";", ",", "=" and spaces
+# in tip names, so tips would no longer match. Heavy and light rows of one clonotype share one.
+# tree_rows maps tips back; nothing else sees the surrogate.
+tip_ids <- unique(resolved$sequence_id)
+resolved$tip_id <- paste0("t", match(resolved$sequence_id, tip_ids))
+TIP_REAL <- setNames(tip_ids, paste0("t", seq_along(tip_ids)))
 
 # Subgroup is in lineage_id; flat, so formatClones neither appends it nor drops light rows.
 resolved$clone_subgroup <- 1L
@@ -908,8 +914,8 @@ tips_db <- db[db$is_representative, , drop = FALSE]
 # formatClones runs per lineage in the pool, and once here for IgPhyML lineages.
 format_lineages <- function(d, nproc) {
   formatClones(d, clone = "lineage_key", seq = "sequence_alignment",
-               germ = "germline_alignment_d_mask", id = "sequence_id",
-               cell = "cell_id", locus = "locus", heavy = HEAVY,
+               germ = "germline_alignment_d_mask", id = "tip_id",
+               cell = "tip_id", locus = "locus", heavy = HEAVY,
                chain = chain, split_light = FALSE, minseq = 2,
                collapse = FALSE, nproc = nproc)
 }
@@ -1082,7 +1088,10 @@ collapse_tree <- function(p) {
 # the rebuilt rows with their deletions, `heavy_width` where heavy ends (dowser joins heavy then light).
 tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer_) {
   anchors <- NULL
-  labels <- c(p$tip.label, rep(NA_character_, p$Nnode))
+  # Tips carry surrogate ids (see TIP_REAL); "Germline" and anything unmapped stay as they are.
+  tips <- p$tip.label
+  real <- unname(TIP_REAL[tips])
+  labels <- c(ifelse(is.na(real), tips, real), rep(NA_character_, p$Nnode))
   parent <- rep(NA_integer_, length(labels))
   dist <- rep(NA_real_, length(labels))
   # A collapsed tree's edge matrix can come back double; the anchor walk wants ids.
@@ -1330,7 +1339,7 @@ process_unit <- function(u) {
 POOL_EXPORTS <- c("attempt_build", "usable_build", "why_build", "build_lineage",
                   "collapse_tree", "tree_rows", "finish_lineage", "process_unit",
                   "route_lineage", "format_lineages", "partition_for", "chain", "HEAVY",
-                  "lineage_seed", "TREE_SEED",
+                  "lineage_seed", "TREE_SEED", "TIP_REAL",
                   "min_tips",
                   "rethreshold_raxml", "iupac_from_probs", "igphyml", "raxml",
                   "ASR_CREDIBLE_MASS", "IUPAC_BY_MASK", "UNAMBIGUOUS", "BUILDER_LABEL",

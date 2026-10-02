@@ -171,6 +171,11 @@ truncated$sequence_alignment[pad] <- paste0(strrep(".", 115),
 write_scenario(file.path(out_root, "truncated"), truncated, light, character(),
                with_light_columns = FALSE, alignments = "table")
 
+# --- oddids ----------------------------------------------------------------
+# Ids holding the characters tree files rewrite: ":", ";", ",", "=" and a space.
+odd <- function(d) { d$cell_id <- paste0("k:a;b,c=d e ", d$cell_id); d }
+write_scenario(file.path(out_root, "oddids"), odd(heavy), odd(light), character())
+
 # --- gapped, mixedgaps -----------------------------------------------------
 # One donor's rows IMGT-gapped, then half of them ungapped as another tool would write them.
 write_scenario(file.path(out_root, "gapped"), heavy, light, character(),

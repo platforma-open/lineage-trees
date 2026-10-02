@@ -392,6 +392,43 @@ function datasetLabels(resultPool: ResultPool): Map<string, string> {
   return new Map(resultPool.getOptions(DATASET_QUERY).map((o) => [refKey(o.ref), o.label]));
 }
 
+/**
+ * Why the settings cannot run, in words for the user, or undefined when they can. `args`
+ * throws with it; the platform only disables Run, so the UI shows this text beside it.
+ */
+export function settingsProblem(data: BlockData): string | undefined {
+  if (canonicalRefs(data.datasets ?? []).length === 0) return "Pick at least one input dataset.";
+  const clusteringMode = data.clusteringMode ?? "fixed";
+  if (
+    clusteringMode === "fixed" &&
+    !(data.clusteringThreshold > 0 && data.clusteringThreshold < 1)
+  ) {
+    return "Clustering threshold must be a fraction between 0 and 1.";
+  }
+  if (clusteringMode === "adaptive") {
+    const fraction = (v: number) => v > 0 && v <= 1;
+    if (
+      !fraction(data.precision ?? DEFAULT_PRECISION) ||
+      !fraction(data.sensitivity ?? DEFAULT_SENSITIVITY)
+    ) {
+      return "Precision and sensitivity must be fractions between 0 and 1.";
+    }
+  }
+  const max = data.maxTipsPerTree;
+  // The tree builders need three tips; below that no cap makes sense.
+  if (max !== undefined && !(Number.isInteger(max) && max >= 3)) {
+    return "Maximum tips per tree must be a whole number of at least 3.";
+  }
+  const min = data.minTipsPerTree;
+  if (
+    min !== undefined &&
+    !(Number.isInteger(min) && min >= 2 && (max === undefined || min <= max))
+  ) {
+    return "Minimum tips per tree must be a whole number between 2 and the maximum.";
+  }
+  return undefined;
+}
+
 /** A new block's data; tests start from it too. A template can seed only `clusteringThreshold`. */
 export function defaultBlockData(
   clusteringThreshold: number = DEFAULT_CLUSTERING_THRESHOLD,
@@ -441,46 +478,16 @@ const dataModel = new DataModelBuilder({ kind })
 
 export const platforma = BlockModelV3.create({ dataModel, kind })
   .args<BlockArgs>((data) => {
+    // The platform shows no reason when this throws, so the UI reads the same check (settingsProblem).
+    const problem = settingsProblem(data);
+    if (problem !== undefined) throw new Error(problem);
     const datasets = canonicalRefs(data.datasets ?? []);
-    if (datasets.length === 0) throw new Error("Pick at least one input dataset");
     // Anchor refs no longer in `datasets` are dropped rather than failing the run.
     const anchorDatasets = effectiveAnchors(data);
     const clusteringMode = data.clusteringMode ?? "fixed";
-    if (
-      clusteringMode === "fixed" &&
-      !(data.clusteringThreshold > 0 && data.clusteringThreshold < 1)
-    ) {
-      throw new Error("Clustering threshold must be a fraction between 0 and 1");
-    }
-    if (clusteringMode === "adaptive") {
-      const fraction = (v: number) => v > 0 && v <= 1;
-      if (
-        !fraction(data.precision ?? DEFAULT_PRECISION) ||
-        !fraction(data.sensitivity ?? DEFAULT_SENSITIVITY)
-      ) {
-        throw new Error("Precision and sensitivity must be fractions between 0 and 1");
-      }
-    }
     // Unset means no cap and a floor of two.
     const maxTipsPerTree = data.maxTipsPerTree;
-    // The tree builders need three tips; below that no cap makes sense.
-    if (
-      maxTipsPerTree !== undefined &&
-      !(Number.isInteger(maxTipsPerTree) && maxTipsPerTree >= 3)
-    ) {
-      throw new Error("Maximum tips per tree must be a whole number of at least 3");
-    }
     const minTipsPerTree = data.minTipsPerTree;
-    if (
-      minTipsPerTree !== undefined &&
-      !(
-        Number.isInteger(minTipsPerTree) &&
-        minTipsPerTree >= 2 &&
-        (maxTipsPerTree === undefined || minTipsPerTree <= maxTipsPerTree)
-      )
-    ) {
-      throw new Error("Minimum tips per tree must be a whole number between 2 and the maximum");
-    }
     // Drop empty lists and sort, so adding or reordering lists does not stale the block.
     const sequencesOfInterest = (data.sequencesOfInterest ?? [])
       .filter((list) => list.sequences.length > 0)
@@ -934,6 +941,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   .output("collectLog", (ctx) => collectStream(ctx.outputs)?.getLogHandle())
   .output("collectProgress", (ctx) => collectStream(ctx.outputs)?.getProgressLog(PROGRESS_PREFIX))
 
+  /** Why Run is disabled, if the settings are the reason; undefined when they can run. */
+  .output("settingsProblem", (ctx) => settingsProblem(ctx.data))
   .output("isRunning", (ctx) => ctx.outputs?.getIsReadyOrError() === false)
   /** A run has finished, with or without an error: an empty table then means no donors. */
   .output("runFinished", (ctx) => ctx.outputs?.getIsReadyOrError() === true)

@@ -67,6 +67,7 @@ RUN_SPECS <- list(
   list("table", TRUE, "raxml", FALSE),
   list("truncated", FALSE, "raxml", FALSE),
   list("gapped", FALSE, "raxml", FALSE),
+  list("oddids", TRUE, "raxml", TRUE),
   list("mixedgaps", FALSE, "raxml", FALSE),
   list("tiny", TRUE, "igphyml", TRUE),
   list("empty", TRUE, "raxml", TRUE),
@@ -458,6 +459,16 @@ if (isTRUE(tr$ok)) {
     "coverages differ" = length(unique(as.integer(tr$aligned$frame_left))) > 2,
     "padded" = grepl("padded to a common frame", tr$log) && !grepl("alignment lengths differ", tr$log)))
 }
+
+cat("== oddids: ':', ';', ',', '=' and spaces in clonotype ids ==\n")
+od <- run_trees("oddids")
+if (isTRUE(od$ok)) {
+  clones <- read_tsv(file.path(root, "oddids", "clones.tsv"))
+  ok_all("oddids: trees are built and every tip links to its own clonotype id", list(
+    "trees are built" = nrow(od$nodes) > 0,
+    "links resolve" = nrow(od$links) > 0 && all(od$links$sequence_id %in% clones$sequence_id),
+    "ids kept as given" = any(grepl("k:a;b,c=d e", od$nodes$label, fixed = TRUE))))
+} else crashed(od, "oddids: runs")
 
 cat("== mixedgaps: IMGT-gapped and ungapped rows in one donor ==\n")
 gp <- run_trees("gapped")

@@ -21,6 +21,10 @@ const view = reactive<{ settingsOpen: boolean; reportOpen: boolean; donor?: stri
 });
 
 const hasDonorColumn = computed(() => app.model.data.donorColumn !== undefined);
+// With no dataset picked, the note above already says what to do.
+const settingsProblem = computed(() =>
+  (app.model.data.datasets ?? []).length === 0 ? undefined : app.model.outputs.settingsProblem,
+);
 // Every clonotype is its own lineage: no V, J and CDR3-length group held two.
 const singletonText = computed(() => {
   const donors = app.model.outputs.singletonDonors ?? [];
@@ -67,6 +71,11 @@ watch(
     <PlAlert v-if="(app.model.data.datasets ?? []).length === 0" type="info">
       Pick one or more IG clonotyping datasets in Settings to infer lineages from. Bulk heavy chain
       and paired single cell are both accepted, imported or from MiXCR; TCR is not.
+    </PlAlert>
+
+    <!-- Run is disabled with no reason given; say which setting holds it back. -->
+    <PlAlert v-if="settingsProblem" type="warn">
+      {{ settingsProblem }} Run stays disabled until it is fixed in Settings.
     </PlAlert>
 
     <PlAlert v-if="app.model.outputs.samplesWithoutDonor?.noneNamed" type="error">
