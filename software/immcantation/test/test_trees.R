@@ -67,6 +67,7 @@ RUN_SPECS <- list(
   list("paired", TRUE, "raxml", TRUE),
   list("bulk", TRUE, "raxml", TRUE),
   list("joins", TRUE, "raxml", TRUE),
+  list("twins", TRUE, "raxml", TRUE),
   list("table", TRUE, "raxml", FALSE),
   list("marks", TRUE, "raxml", FALSE),
   list("truncated", FALSE, "raxml", FALSE),
@@ -387,6 +388,28 @@ if (p$ok) {
     "light figure when paired, aa within nt" = any(with_light) &&
       all(as_int(d$anchor_aa_light[with_light]) <= as_int(d$anchor_nt_light[with_light]))))
 } else crashed(p, first)
+
+cat("== twins: one heavy chain with two light chains votes once ==\n")
+tw <- run_trees("twins")
+first <- "twins: a twin shares its source's lineage and score and adds no vote"
+if (!isTRUE(tw$ok)) crashed(tw, first) else {
+  here <- file.path(root, "twins")
+  twins <- readLines(file.path(here, "twins.txt"))
+  sources <- readLines(file.path(here, "sources.txt"))
+  lineage_of <- setNames(tw$lineages$lineage_id, tw$lineages$sequence_id)
+  scored <- setNames(tw$cdist$aa_cdist, tw$cdist$sequence_id)
+  counts <- setNames(as.integer(tw$consensus$consensus_sequence_count), tw$consensus$lineage_id)
+  lid <- unique(lineage_of[sources])
+  # Every other member of the deep clone carries a distinct heavy sequence.
+  members <- names(lineage_of)[lineage_of %in% lid]
+  ok_all(first, list(
+    "same lineage" = length(lid) == 1 && identical(unname(lineage_of[twins]), unname(lineage_of[sources])),
+    "scored" = all(c(twins, sources) %in% names(scored)),
+    "same score" = identical(unname(scored[twins]), unname(scored[sources])),
+    "one vote per heavy sequence" = length(lid) == 1 &&
+      counts[[lid]] == length(members) - sum(members %in% twins)))
+  check_aa_cdist(tw, "twins")
+}
 
 cat("== bulk: 5'-truncated light-less members join the light subgroup of their cell ==\n")
 b <- run_trees("bulk")

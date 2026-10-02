@@ -737,10 +737,12 @@ aa_distances <- function(m, cons) {
 
 progress("Amino acid consensus distance")
 heavy_seqs <- resolved[resolved$locus == HEAVY,
-                       c("sequence_id", "lineage_id", "sequence_alignment", "frame_left", "group_id")]
+                       c("sequence_id", "lineage_id", "sequence_alignment", "frame_left")]
 heavy_seqs <- heavy_seqs[!duplicated(heavy_seqs$sequence_id), ]
-# One vote per distinct sequence, as the paper does not weight by count.
-voters <- heavy_seqs[!duplicated(heavy_seqs$group_id), ]
+# One vote per distinct heavy sequence in a lineage, whatever its light chain or dataset,
+# as the paper does not weight by count.
+heavy_seqs$heavy_key <- paste(heavy_seqs$lineage_id, heavy_seqs$frame_left, heavy_seqs$sequence_alignment)
+voters <- heavy_seqs[!duplicated(heavy_seqs$heavy_key), ]
 
 # Row indices per lineage in first-appearance order: one pass instead of a scan per lineage.
 rows_by_lineage <- function(d) {
@@ -752,11 +754,11 @@ heavy_lineages <- rows_by_lineage(voters)
 support <- data.frame(lineage_id = as.character(names(heavy_lineages)),
                       consensus_sequence_count = unname(lengths(heavy_lineages)),
                       stringsAsFactors = FALSE)
-members_by_group <- split(heavy_seqs$sequence_id, heavy_seqs$group_id)
+members_by_group <- split(heavy_seqs$sequence_id, heavy_seqs$heavy_key)
 # Plain vectors: slicing the data frame per lineage cost more than the work.
 voter_seq <- voters$sequence_alignment
 voter_frame <- as.integer(voters$frame_left)
-voter_group <- voters$group_id
+voter_group <- voters$heavy_key
 
 # Matched once: indexing a large named list by name rehashes on every call.
 member_of <- match(voter_group, names(members_by_group))

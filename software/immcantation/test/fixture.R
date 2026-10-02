@@ -6,6 +6,7 @@
 #   joins      AIRR route with an ambiguous tuple join
 #   table      heavy only, alignments on the clonotype table; deep lineage and exact copies
 #   truncated  table route with partial 5' coverage
+#   twins      one heavy chain with two light chains, for the consensus vote
 #   tiny       two tips per lineage, for IgPhyML
 #   empty      a donor with no data
 #   bare       no alignment columns and no AIRR export
@@ -170,6 +171,20 @@ write_scenario(file.path(out_root, "table"), table_db, light, character(),
                with_light_columns = FALSE, alignments = "table")
 note("table", "duplicated.txt", key(c(deep_source$cell_id[1:2], dup$cell_id)))
 note("table", "anchor.txt", key(dup$cell_id[1]))
+
+# --- twins ----------------------------------------------------------------
+# The deep clone plus twins of three members: the same heavy chain, a light chain one FR1
+# base apart. A twin is a distinct clonotype but not a distinct heavy sequence.
+twin_of <- deep_source[deep_source$cell_id %in% light$cell_id, ][1:3, ]
+twins <- twin_of
+twins$cell_id <- paste0(twins$cell_id, "_twin")
+twin_light <- light[match(twin_of$cell_id, light$cell_id), ]
+twin_light$cell_id <- twins$cell_id
+at <- vapply(strsplit(twin_light$sequence_alignment, ""), function(s) which(s %in% names(flip))[5], integer(1))
+substr(twin_light$sequence_alignment, at, at) <- flip[substr(twin_light$sequence_alignment, at, at)]
+write_scenario(file.path(out_root, "twins"), rbind(deep, twins), rbind(light, twin_light), character())
+note("twins", "twins.txt", key(twins$cell_id))
+note("twins", "sources.txt", key(twin_of$cell_id))
 
 # --- truncated ------------------------------------------------------------
 # Cuts of 115 and 170 leave the start off a codon boundary; a "." pad over the uncovered 5' side must be cut.
