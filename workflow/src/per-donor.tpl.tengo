@@ -325,10 +325,10 @@ self.body(func(inputs) {
 			resources({
 				onCPU: {
 					cpu: treeCPUs,
-					// Peak ~40 KB per sequence; lineages are disjoint, so the whole table bounds it.
-					// High ceiling: forked R workers drift to private copies; the step fits workers to its cgroup.
-					ram: f.size("aligned").times(40).plus(f.gib(2)).
-						between(f.gib(8), f.gib(64)).staticFallback(f.gib(16))
+					// Twice the ~40 KB per sequence once measured: the step fits workers to its cgroup,
+					// and 120k clonotypes at the old 8 GiB floor fit only 2 and were killed.
+					ram: f.size("aligned").times(80).plus(f.gib(4)).
+						between(f.gib(16), f.gib(64)).staticFallback(f.gib(24))
 				}
 			}).
 			addFile("clonotypes.tsv", clonotypes).
