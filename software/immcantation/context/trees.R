@@ -553,9 +553,15 @@ if (!nrow(joined)) finish_empty("no aligned clonotype belongs to a clone")
 # Lineage refinement.
 
 if (use_light) {
+  # Bulk members are matched to cells by distance after padding on the right, so rows
+  # truncated on the 5' side would be compared shifted. Pad the left with N to a common
+  # start, which the distance ignores; the trees keep sequence_alignment.
+  joined$light_match_seq <- paste0(strrep("N", max(joined$frame_left) - joined$frame_left),
+                                   joined$sequence_alignment)
   # minseq 1: a single-member clone still needs a lineage id.
   resolved <- resolveLightChains(joined, cell = "cell_id", locus = "locus",
-                                 heavy = HEAVY, minseq = 1)
+                                 heavy = HEAVY, seq = "light_match_seq", minseq = 1)
+  resolved$light_match_seq <- NULL
   resolved$lineage_id <- resolved$clone_subgroup_id
   h <- resolved[resolved$locus == HEAVY, ]
   cat(sprintf("resolveLightChains: %d clones into %d lineages, %d members without a light chain\n",

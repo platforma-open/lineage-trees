@@ -65,6 +65,7 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
 # All scenarios run in parallel before any check.
 RUN_SPECS <- list(
   list("paired", TRUE, "raxml", TRUE),
+  list("bulk", TRUE, "raxml", TRUE),
   list("joins", TRUE, "raxml", TRUE),
   list("table", TRUE, "raxml", FALSE),
   list("marks", TRUE, "raxml", FALSE),
@@ -386,6 +387,19 @@ if (p$ok) {
     "light figure when paired, aa within nt" = any(with_light) &&
       all(as_int(d$anchor_aa_light[with_light]) <= as_int(d$anchor_nt_light[with_light]))))
 } else crashed(p, first)
+
+cat("== bulk: 5'-truncated light-less members join the light subgroup of their cell ==\n")
+b <- run_trees("bulk")
+first <- "bulk: each truncated bulk copy lands in its source cell's lineage"
+if (b$ok) {
+  here <- file.path(root, "bulk")
+  bulk <- readLines(file.path(here, "bulk.txt"))
+  lineage_of <- setNames(b$lineages$lineage_id, b$lineages$sequence_id)
+  source_of <- sub("^ck_bulk_", "ck_", bulk)
+  ok_all(first, list(
+    "clone splits" = length(unique(lineage_of[source_of])) > 1,
+    "with its source" = all(lineage_of[bulk] == lineage_of[source_of])))
+} else crashed(b, first)
 
 cat("== joins: shared V/J/junction, one light chain across many clonotypes ==\n")
 j <- run_trees("joins")

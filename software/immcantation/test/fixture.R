@@ -112,6 +112,22 @@ note("paired", "dark.txt", key(dark))
 note("paired", "anchor.txt", key(anchored[1]))
 note("paired", "inserted-rows.txt", as.character(length(odd)))
 
+# --- bulk -----------------------------------------------------------------
+# The split clone plus a bulk copy of each member: no light chain, 120 bases short on
+# the 5' side, one base changed so it joins its own AIRR row.
+bulk_of <- heavy[heavy$cell_id %in% split_clone, ]
+bulk_of$cell_id <- paste0("bulk_", bulk_of$cell_id)
+for (col in c("sequence_alignment", "germline_alignment")) {
+  bulk_of[[col]] <- substr(bulk_of[[col]], 121, nchar(bulk_of[[col]]))
+}
+flip <- c(A = "C", C = "A", G = "T", T = "G")
+at <- vapply(strsplit(bulk_of$sequence_alignment, ""), function(s) which(s %in% names(flip))[5], integer(1))
+substr(bulk_of$sequence_alignment, at, at) <- flip[substr(bulk_of$sequence_alignment, at, at)]
+write_scenario(file.path(out_root, "bulk"), rbind(heavy[heavy$cell_id %in% split_clone, ], bulk_of),
+               split_light, bulk_of$cell_id)
+note("bulk", "recombined.txt", key(recombined))
+note("bulk", "bulk.txt", key(bulk_of$cell_id))
+
 # --- joins ----------------------------------------------------------------
 # Clone members share one junction (as with assembly wider than CDR3), and one light chain pairs with all.
 splice_junction <- function(aln, from, to) {
