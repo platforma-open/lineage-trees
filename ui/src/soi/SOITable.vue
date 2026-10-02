@@ -18,6 +18,12 @@ const gridApi = ref<GridApi<SequenceOfInterest>>();
 const gridOptions: GridOptions<SequenceOfInterest> = {
   getRowId: (row) => String(row.data.id),
   onGridReady: (p) => (gridApi.value = p.api),
+  // The grid edits raw copies of the rows, which Vue does not see, so the edit is saved by
+  // replacing the row in the model.
+  onCellValueChanged: (e) => {
+    const idx = model.value.findIndex((s) => s.id === e.data.id);
+    if (idx >= 0) model.value.splice(idx, 1, { ...e.data });
+  },
 };
 
 watch(
