@@ -99,12 +99,18 @@ pool <- data.frame(
   v_query = toupper(substr(aligned$sequence_alignment[rows], 1L, left[rows])),
   v_ref = toupper(substr(aligned$germline_alignment[rows], 1L, left[rows])),
   stringsAsFactors = FALSE)
-cat(sprintf("pooled %d heavy sequences with a V side from the aligned table\n", nrow(pool)))
-if (nrow(pool) < min_sequences) {
-  finish("reference", sprintf("%d heavy sequences with alignments, below the %d TIgGER needs to tell a novel allele from noise",
-                              nrow(pool), min_sequences))
-}
 pool$allele <- allele_of(pool$v_call)
+# One vote per distinct rearrangement: one heavy chain read as several clonotypes (paired with
+# two light chains, or the same clone in two datasets) would otherwise count each time. J and
+# junction stay in the key, since TIgGER reads their variety as evidence for a novel allele.
+pool$key <- paste(pool$allele, pool$j_call, pool$junction, pool$v_query, sep = "\r")
+distinct <- !duplicated(pool$key)
+cat(sprintf("pooled %d heavy sequences with a V side from the aligned table, %d of them distinct\n",
+            nrow(pool), sum(distinct)))
+if (sum(distinct) < min_sequences) {
+  finish("reference", sprintf("%d distinct heavy sequences with alignments, below the %d TIgGER needs to tell a novel allele from noise",
+                              sum(distinct), min_sequences))
+}
 
 # Too short a stretch of germline to tell one allele of a gene from another.
 readable <- nchar(pool$v_ref) >= 30L
@@ -165,17 +171,18 @@ if (max(per_gene) == 1) {
 
 # The V alone, aligned at the junction and padded past its end: TIgGER's 312 cut then
 # ends in padding every row shares rather than in the CDR3.
+once <- pool[distinct, , drop = FALSE]
 db <- data.frame(
-  sequence_id = pool$id,
-  v_call = pool$v_call,
-  j_call = pool$j_call,
-  junction = pool$junction,
-  junction_length = nchar(pool$junction),
-  sequence_alignment = paste0(pad_left(pool$v_query), strrep(".", max(0L, IMGT_V_LENGTH - width))),
+  sequence_id = once$id,
+  v_call = once$v_call,
+  j_call = once$j_call,
+  junction = once$junction,
+  junction_length = nchar(once$junction),
+  sequence_alignment = paste0(pad_left(once$v_query), strrep(".", max(0L, IMGT_V_LENGTH - width))),
   stringsAsFactors = FALSE)
 
 # Input shape, logged to help debug runs killed inside `findNovelAlleles`.
-per_allele <- sort(table(pool$allele), decreasing = TRUE)
+per_allele <- sort(table(once$allele), decreasing = TRUE)
 say("per allele: %d alleles, largest %d sequences, median %g, smallest %d\n",
     length(per_allele), max(per_allele), median(per_allele), min(per_allele))
 say("alignment width: median %d, range %d to %d; junction length median %d, range %d to %d\n",
@@ -251,12 +258,14 @@ if (inherits(reassigned, "error")) {
 if (!"v_call_genotyped" %in% names(reassigned)) {
   finish("reference", "TIgGER returned no v_call_genotyped, so nothing was reassigned")
 }
-new_call <- reassigned$v_call_genotyped[match(pool$id, reassigned$sequence_id)]
+# Each row takes the call of the distinct sequence it shares.
+voter <- once$id[match(pool$key, once$key)]
+new_call <- reassigned$v_call_genotyped[match(voter, reassigned$sequence_id)]
 kept <- present(new_call) & !is.na(new_call)
 # Offered: rows whose new allele differs from the original one.
 offered <- kept & allele_of(new_call) != allele_of(pool$v_call)
 cat(sprintf("TIgGER: %d of %d heavy sequences reassigned, %d offered a different allele, %d given back the allele they had\n",
-            sum(kept), nrow(db), sum(offered), sum(kept & !offered)))
+            sum(kept), nrow(pool), sum(offered), sum(kept & !offered)))
 
 # The germline follows the call over the row's own V side, counted from the junction.
 # Where the allele is not known that far 5', the row keeps its own base. Junction and J stay.

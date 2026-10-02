@@ -109,6 +109,10 @@ for (column in c("sequence_alignment", "germline_alignment")) {
 }
 write_tsv(truncated, file.path(work, "truncated.tsv"))
 
+# Every clonotype twice under another id, as one heavy chain paired with two light chains is.
+doubled <- rbind(donor, transform(donor, sequence_id = paste0(sequence_id, "_twin")))
+write_tsv(doubled, file.path(work, "doubled.tsv"))
+
 # Inputs for the reference route, each stopping before inference.
 calls <- c("sequence_id", "v_call", "j_call", "junction", "dataset")
 write_tsv(donor[, calls], file.path(work, "bare.tsv"))
@@ -147,6 +151,7 @@ RUNS <- list(
   mixcr = list("mixcr", file.path(work, "mixcr.tsv"), airr_dir),
   mixed = list("mixed", file.path(work, "mixed.tsv"), airr_dir),
   truncated = list("truncated", file.path(work, "truncated.tsv")),
+  doubled = list("doubled", file.path(work, "doubled.tsv")),
   bare = list("bare", file.path(work, "bare.tsv")),
   shallow = list("shallow", file.path(work, "shallow.tsv")),
   disagreeing = list("disagreeing", file.path(work, "disagreeing.tsv")),
@@ -214,6 +219,23 @@ for (name in c("stripped", "mixcr", "mixed", "truncated")) {
   ok(sprintf("%s: the mislabelled sequences go back, and the novel allele is found", name),
      all(allele_of(now[mislabelled]) == from) && any(grepl("^IGHV1-8\\*02_", now)))
 }
+
+cat("== doubled: each clonotype twice ==\n")
+r <- results$doubled
+if (isTRUE(r$ok) && !is.null(r$after)) {
+  a <- heavy(r$after)
+  twin <- a$v_call[match(paste0(donor$sequence_id, "_twin"), a$sequence_id)]
+  own <- a$v_call[match(donor$sequence_id, a$sequence_id)]
+  # Against the single donor: twice the rows, the same distinct sequences (it has twins of its own).
+  pooled <- function(log) as.integer(regmatches(log, regexec(
+    "pooled (\\d+) heavy sequences with a V side from the aligned table, (\\d+) of them distinct", log))[[1]][2:3])
+  twice <- pooled(r$log)
+  once <- pooled(results$donor$log)
+  ok_twice <- !anyNA(c(twice, once)) && twice[1] == 2L * once[1] && twice[2] == once[2]
+  ok("doubled: TIgGER counts each sequence once, and both copies take the same call",
+     identical(r$route$route, "tigger") && ok_twice && identical(own, twin) &&
+       all(allele_of(own[mislabelled]) == from))
+} else { ok("doubled: runs", FALSE); tail_of(r) }
 
 # Each case must keep the reference alleles, not fail, and pass both tables through.
 for (case in list(

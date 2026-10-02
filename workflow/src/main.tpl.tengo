@@ -364,7 +364,8 @@ wf.body(func(args) {
 		}).
 		arg("merge").
 		arg("--out-clonotypes").arg("clonotypes.tsv").
-		arg("--out-abundance").arg("abundance.tsv")
+		arg("--out-abundance").arg("abundance.tsv").
+		arg("--out-annotations").arg("annotations.tsv")
 	for ds in datasets {
 		idx := string(ds.index)
 		mergeCmd.addFile("clonotypes-" + idx + ".tsv", ds.clonotypeTable, { tag: "mergeInput" }).
@@ -380,6 +381,7 @@ wf.body(func(args) {
 	merged := mergeCmd.
 		saveFile("clonotypes.tsv").
 		saveFile("abundance.tsv").
+		saveFile("annotations.tsv").
 		saveStdoutContent().
 		printErrStreamToStdout().
 		run()
@@ -418,6 +420,8 @@ wf.body(func(args) {
 	perDonor := render.createEphemeral(perDonorTpl, {
 		clonotypeTable: clonotypeTable,
 		abundanceTable: abundanceTable,
+		// Dataset names and anchors, read only by the tree step and collect.
+		annotationsTable: merged.getFile("annotations.tsv"),
 		donorColumn: donorColumnInput,
 		clns: clnsByDataset,
 		sampleMetadata: sampleMetadataByDataset,

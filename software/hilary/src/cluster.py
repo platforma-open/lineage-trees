@@ -177,7 +177,7 @@ def run_hilary(
 
 
 def _alt_alignments(clonotypes: pd.DataFrame, aligned: pd.DataFrame) -> pd.DataFrame | None:
-    """Heavy alignments for the full method, N-padded to one length; None if any are missing.
+    """Heavy alignments for the full method, padded to one length; None if any are missing.
 
     HILARy compares rows position by position, so they must line up.
     """
@@ -188,11 +188,34 @@ def _alt_alignments(clonotypes: pd.DataFrame, aligned: pd.DataFrame) -> pd.DataF
         return None
     left = heavy["frame_left"].astype(int)
     right = heavy["frame_right"].astype(int)
-    pad_left = (left.max() - left).map(lambda n: "N" * int(n))
-    pad_right = (right.max() - right).map(lambda n: "N" * int(n))
+    germline = heavy["germline_alignment"].astype(str)
+    # Rows end at different 5' and 3' points. HILARy compares two rows base by base, and an N
+    # against a base counts as a difference, so N padding reads as mutations and keeps related
+    # members of different coverage apart. A row is padded with its gene's germline instead,
+    # the same in sequence and germline, so the padding reads as unmutated. Each flank is taken
+    # from the longest germline of that gene, lined up at the junction; N only where no row of
+    # the gene reaches.
+    gene = lambda calls: calls.astype(str).str.split(",", n=1).str[0].str.split("*", n=1).str[0]
+    v_gene, j_gene = gene(heavy["v_call"]), gene(heavy["j_call"])
+    v_flank = pd.Series([g[:l] for g, l in zip(germline, left)], index=heavy.index)
+    j_flank = pd.Series([g[len(g) - r:] if r else "" for g, r in zip(germline, right)], index=heavy.index)
+    longest = lambda flanks, genes: flanks.groupby(genes).agg(lambda f: max(f, key=len)).to_dict()
+    v_ref, j_ref = longest(v_flank, v_gene), longest(j_flank, j_gene)
+    max_left, max_right = int(left.max()), int(right.max())
+
+    def five_prime(ref: str, have: int) -> str:
+        need = max_left - have
+        return ("N" * need + ref[:len(ref) - have])[-need:] if need > 0 else ""
+
+    def three_prime(ref: str, have: int) -> str:
+        need = max_right - have
+        return (ref[have:] + "N" * need)[:need] if need > 0 else ""
+
+    pad_left = pd.Series([five_prime(v_ref[g], l) for g, l in zip(v_gene, left)], index=heavy.index)
+    pad_right = pd.Series([three_prime(j_ref[g], r) for g, r in zip(j_gene, right)], index=heavy.index)
     padded = pd.DataFrame({
         "alt_sequence_alignment": pad_left + heavy["masked_sequence_alignment"] + pad_right,
-        "alt_germline_alignment": pad_left + heavy["germline_alignment"] + pad_right,
+        "alt_germline_alignment": pad_left + germline + pad_right,
     })
     return padded.reindex(clonotypes["sequence_id"]).set_index(clonotypes.index)
 
@@ -235,6 +258,13 @@ def merge(args: argparse.Namespace) -> None:
         print(f"dataset {index}: {len(clonotypes)} clonotypes, {len(abundance)} abundance rows "
               f"({data_source})", file=sys.stderr)
     merged = pd.concat(clonotype_parts, ignore_index=True).fillna("")
+    # Dataset names and anchors go apart: only the tree step and collect read them, so
+    # renaming a dataset or toggling an anchor leaves the table alignment, allele inference
+    # and clustering read unchanged, and their results are reused.
+    annotation_columns = ["sequence_id", "data_source", "is_anchor"]
+    if args.out_annotations is not None:
+        merged[annotation_columns].to_csv(args.out_annotations, sep="\t", index=False)
+        merged = merged.drop(columns=["data_source", "is_anchor"])
     merged.to_csv(args.out_clonotypes, sep="\t", index=False)
     pd.concat(abundance_parts, ignore_index=True).fillna("").to_csv(
         args.out_abundance, sep="\t", index=False
@@ -685,7 +715,18 @@ def _write_per_dataset(
 
 
 def _read_clonotypes(args: argparse.Namespace, donors: list) -> pd.DataFrame:
-    """The clonotypes the tools saw: per-donor files (with realigned calls) if given, else the merged file."""
+    """The clonotypes the tools saw, with merge's dataset name and anchor flag joined back."""
+    clonotypes = _read_clonotype_tables(args, donors)
+    annotations = getattr(args, "annotations", None)
+    if annotations is None or not annotations.exists():
+        return clonotypes
+    marks = pd.read_csv(annotations, sep="\t", dtype=str, keep_default_na=False)
+    kept = [c for c in clonotypes.columns if c not in ("data_source", "is_anchor")]
+    return clonotypes[kept].merge(marks.drop_duplicates("sequence_id"), on="sequence_id", how="left").fillna("")
+
+
+def _read_clonotype_tables(args: argparse.Namespace, donors: list) -> pd.DataFrame:
+    """Per-donor files (with realigned calls) if given, else the merged file."""
     if args.clonotypes_dir is not None:
         parts = [_read_donor_file(args.clonotypes_dir, index, ["sequence_id"])
                  for index in range(len(donors))]
@@ -981,6 +1022,8 @@ def main() -> None:
     )
     m.add_argument("--out-clonotypes", required=True, type=Path)
     m.add_argument("--out-abundance", required=True, type=Path)
+    m.add_argument("--out-annotations", type=Path,
+                   help="dataset name and anchor flag per clonotype, kept out of --out-clonotypes")
     m.set_defaults(func=merge)
 
     sp = stages.add_parser("split", help="one clonotype table per donor")
@@ -1028,6 +1071,7 @@ def main() -> None:
 
     k = stages.add_parser("collect", help="merge per-donor tree output and summarise")
     k.add_argument("--lineages-dir", required=True, type=Path)
+    k.add_argument("--annotations", type=Path, help="merge's dataset name and anchor flag per clonotype")
     k.add_argument(
         "--donor",
         action="append",

@@ -32,7 +32,9 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
   if (!is.null(attr(align_log, "status"))) {
     return(list(ok = FALSE, log = paste(align_log, collapse = "\n"), dir = outdir))
   }
+  marks <- file.path(dir, "annotations.tsv")
   argv <- c(trees_R, "--stage", "trees", common,
+            if (file.exists(marks)) c("--annotations", marks),
             "--aligned", aligned,
             "--clones", file.path(dir, "clones.tsv"),
             # IgPhyML is chosen by scope; trees.R has no --builder.
@@ -65,6 +67,7 @@ RUN_SPECS <- list(
   list("paired", TRUE, "raxml", TRUE),
   list("joins", TRUE, "raxml", TRUE),
   list("table", TRUE, "raxml", FALSE),
+  list("marks", TRUE, "raxml", FALSE),
   list("truncated", FALSE, "raxml", FALSE),
   list("gapped", FALSE, "raxml", FALSE),
   list("oddids", TRUE, "raxml", TRUE),
@@ -459,6 +462,15 @@ if (isTRUE(tr$ok)) {
     "coverages differ" = length(unique(as.integer(tr$aligned$frame_left))) > 2,
     "padded" = grepl("padded to a common frame", tr$log) && !grepl("alignment lengths differ", tr$log)))
 }
+
+cat("== marks: anchors read from merge's annotations table ==\n")
+mk <- run_trees("marks")
+tb2 <- run_trees("table")
+if (isTRUE(mk$ok) && isTRUE(tb2$ok)) {
+  key <- function(a) sort(paste(a$sequence_id, a$anchor_id))
+  ok("marks: anchors come from the annotations table, as they did from the clonotype table",
+     nrow(mk$anchors) > 0 && identical(key(mk$anchors), key(tb2$anchors)))
+} else crashed(if (isTRUE(mk$ok)) tb2 else mk, "marks: runs")
 
 cat("== oddids: ':', ';', ',', '=' and spaces in clonotype ids ==\n")
 od <- run_trees("oddids")

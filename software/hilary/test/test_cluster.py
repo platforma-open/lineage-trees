@@ -95,7 +95,8 @@ def main(tmp: Path) -> None:
 
     merged, abundance = tmp / "merged.tsv", tmp / "abundance.tsv"
     stage("merge", "--dataset", "0", ds0, ab0, "mixcr", "--dataset", "1", ds1, ab1, "imported",
-          "--out-clonotypes", merged, "--out-abundance", abundance)
+          "--out-clonotypes", merged, "--out-abundance", abundance,
+          "--out-annotations", tmp / "annotations.tsv")
     stage("split", "--clonotypes", merged, "--abundance", abundance, "--donors", donors_tsv,
           "--out-dir", tmp / "split", *donor_args)
     for d in ("lineages", "nodes", "node-links"):
@@ -113,7 +114,8 @@ def main(tmp: Path) -> None:
         assigned.to_csv(tmp / "lineages" / f"donor-{index}.tsv", sep="\t", index=False)
         per_donor[donor] = dict(zip(assigned["sequence_id"], assigned["lineage_id"]))
     out = tmp / "out"
-    collect_out = stage("collect", "--lineages-dir", tmp / "lineages", "--nodes-dir", tmp / "nodes",
+    collect_out = stage("collect", "--annotations", tmp / "annotations.tsv",
+          "--lineages-dir", tmp / "lineages", "--nodes-dir", tmp / "nodes",
           "--node-links-dir", tmp / "node-links", "--abundance", abundance,
           "--donors", donors_tsv, "--clonotypes", merged, *donor_args,
           "--dataset", "0", "--dataset", "1", "--per-dataset-dir", out,
@@ -141,6 +143,12 @@ def main(tmp: Path) -> None:
     ok("an empty donor clusters to nothing rather than failing", not per_donor["C"])
 
     print("== collect ==")
+    merged_columns = read(merged).columns
+    ok("merge keeps dataset names and anchors out of the table the early steps read",
+       "data_source" not in merged_columns and "is_anchor" not in merged_columns
+       and set(read(tmp / "annotations.tsv")["data_source"]) == {"mixcr", "imported"})
+    ok("collect joins them back: lineages name their data source",
+       set(read(tmp / "lineage-stats.tsv")["data_source"]) >= {"mixcr"})
     # The UI reads the last "[==PROGRESS==]" line: a rising percentage, ending at 100%.
     percents = [float(line.rsplit(": ", 1)[1].rstrip("%"))
                 for line in collect_out.splitlines() if line.startswith("[==PROGRESS==]")]
@@ -211,6 +219,22 @@ def main(tmp: Path) -> None:
     ok("collect with a donor column and no lineage reports the donor with nothing in it",
        json.loads((empty / "donor-stats.json").read_text())
        == [{"donor": "A", "clonotype_count": 0, "lineage_count": 0}])
+
+    # The full method compares rows base by base, so padding must not read as a difference:
+    # a member with shorter 5' and 3' coverage pads with its gene's germline, not N.
+    v_side, j_side = "ACGTACGTACGTAAAACCCCGGGG", "TTTGGGCCC"
+    junction_n = "N" * 12
+    def row(sid, cut_v, cut_j):
+        g = v_side[cut_v:] + junction_n + j_side[:len(j_side) - cut_j]
+        return {"sequence_id": sid, "locus": "IGH", "v_call": "IGHV1-2*02", "j_call": "IGHJ4*02",
+                "germline_alignment": g, "masked_sequence_alignment": g,
+                "frame_left": str(len(v_side) - cut_v), "frame_right": str(len(j_side) - cut_j)}
+    aligned_rows = pd.DataFrame([row("0_full", 0, 0), row("0_short", 8, 4)])
+    alt = cluster._alt_alignments(pd.DataFrame({"sequence_id": ["0_full", "0_short"]}), aligned_rows)
+    s_full, s_short = alt["alt_sequence_alignment"].tolist()
+    ok("full method padding: unmutated members of different coverage are identical, not apart by their padding",
+       len(s_full) == len(s_short) and s_full == s_short
+       and alt["alt_sequence_alignment"].tolist() == alt["alt_germline_alignment"].tolist())
 
     # A node's datasets, from merge's data_source, in the pass that counts its clonotypes.
     placed = pd.DataFrame({"sequence_id": ["0_a", "1_b"], "lineage_id": ["L1", "L1"],

@@ -171,6 +171,18 @@ truncated$sequence_alignment[pad] <- paste0(strrep(".", 115),
 write_scenario(file.path(out_root, "truncated"), truncated, light, character(),
                with_light_columns = FALSE, alignments = "table")
 
+# --- marks -----------------------------------------------------------------
+# The table scenario with anchors in a separate annotations table, as merge now writes them.
+marks_dir <- file.path(out_root, "marks")
+dir.create(marks_dir, showWarnings = FALSE)
+file.copy(list.files(file.path(out_root, "table"), full.names = TRUE), marks_dir, recursive = TRUE)
+marks_clono <- read.delim(file.path(marks_dir, "clonotypes.tsv"), colClasses = "character")
+write.table(data.frame(sequence_id = marks_clono$sequence_id, data_source = "table",
+                       is_anchor = marks_clono$is_anchor),
+            file.path(marks_dir, "annotations.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(marks_clono[, setdiff(names(marks_clono), "is_anchor")],
+            file.path(marks_dir, "clonotypes.tsv"), sep = "\t", quote = FALSE, row.names = FALSE, na = "")
+
 # --- oddids ----------------------------------------------------------------
 # Ids holding the characters tree files rewrite: ":", ";", ",", "=" and a space.
 odd <- function(d) { d$cell_id <- paste0("k:a;b,c=d e ", d$cell_id); d }

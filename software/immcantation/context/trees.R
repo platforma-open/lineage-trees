@@ -224,8 +224,12 @@ if (use_light && !has_light_columns) {
 
 present <- function(x) !is.na(x) & nzchar(x)
 
-# Anchors, as `merge` marked them; the "anchored" IgPhyML scope builds their lineages.
-anchor_ids <- if ("is_anchor" %in% names(clono)) clono$sequence_id[clono$is_anchor == "true"] else character(0)
+# Anchors, as `merge` marked them; the "anchored" IgPhyML scope builds their lineages. They
+# come apart from the clonotype table, so toggling one does not rerun the steps before this.
+annotations_path <- opt("--annotations", required = FALSE)
+marks <- if (!is.null(annotations_path) && file.exists(annotations_path)) read_tsv(annotations_path) else clono
+anchor_ids <- if ("is_anchor" %in% names(marks)) marks$sequence_id[marks$is_anchor == "true"] else character(0)
+rm(marks)
 
 if (stage == "align") {
 progress("Joining alignments to clonotypes")
