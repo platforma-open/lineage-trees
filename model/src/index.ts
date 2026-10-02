@@ -539,7 +539,10 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
    */
   .output("donorOptions", (ctx) => {
     const sampleAxes = new Set<string>();
-    const refs = [...(ctx.data.datasets ?? []), ...(ctx.data.donorColumn ? [ctx.data.donorColumn] : [])];
+    const refs = [
+      ...(ctx.data.datasets ?? []),
+      ...(ctx.data.donorColumn ? [ctx.data.donorColumn] : []),
+    ];
     for (const ref of refs) {
       const axis = ctx.resultPool.getPColumnSpecByRef(ref)?.axesSpec[0];
       if (axis !== undefined) sampleAxes.add(axisKey(axis));
