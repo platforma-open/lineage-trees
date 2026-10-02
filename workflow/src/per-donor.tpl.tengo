@@ -222,7 +222,7 @@ self.body(func(inputs) {
 				onCPU: {
 					cpu: 2,
 					ram: f.size("clonotypes").times(20).plus(f.gib(2)).
-						between(f.gib(4), f.gib(32)).staticFallback(f.gib(8))
+						between(f.gib(4), f.gib(256)).staticFallback(f.gib(8))
 				}
 			}).
 			addFile("clonotypes.tsv", clonotypes, { tag: "clonotypes" }).
@@ -254,7 +254,7 @@ self.body(func(inputs) {
 				onCPU: {
 					cpu: 4,
 					ram: f.size("alleleInput").times(20).plus(f.gib(2)).
-						between(f.gib(4), f.gib(32)).staticFallback(f.gib(8))
+						between(f.gib(4), f.gib(256)).staticFallback(f.gib(8))
 				}
 			}).
 			addFile("clonotypes.tsv", clonotypes, { tag: "alleleInput" }).
@@ -289,7 +289,7 @@ self.body(func(inputs) {
 				onCPU: {
 					cpu: 16,
 					ram: f.size("aligned").times(20).plus(f.gib(4)).
-						between(f.gib(8), f.gib(64)).staticFallback(f.gib(16))
+						between(f.gib(8), f.gib(256)).staticFallback(f.gib(16))
 				}
 			}).
 			addFile("clonotypes.tsv", clonotypes, { tag: "aligned" }).
@@ -328,7 +328,7 @@ self.body(func(inputs) {
 					// Twice the ~40 KB per sequence once measured: the step fits workers to its cgroup,
 					// and 120k clonotypes at the old 8 GiB floor fit only 2 and were killed.
 					ram: f.size("aligned").times(80).plus(f.gib(4)).
-						between(f.gib(16), f.gib(64)).staticFallback(f.gib(24))
+						between(f.gib(16), f.gib(256)).staticFallback(f.gib(24))
 				}
 			}).
 			addFile("clonotypes.tsv", clonotypes).
