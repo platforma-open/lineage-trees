@@ -304,20 +304,45 @@ def cluster(args: argparse.Namespace) -> None:
         if args.out_method is not None:
             args.out_method.write_text(json.dumps({"method": method, "reason": reason}))
 
-    # HILARy fails on an empty input, and an empty donor is normal.
-    if clonotypes.empty:
+    def no_clonotypes() -> None:
         pd.DataFrame(columns=["sequence_id", "clone_id"]).to_csv(
             args.out_clones, sep="\t", index=False
         )
         record_method("none", "no clonotypes for this donor")
         print("no clonotypes for this donor", file=sys.stderr)
         progress("Clustering: no clonotypes")
+
+    # HILARy fails on an empty input, and an empty donor is normal.
+    if clonotypes.empty:
+        no_clonotypes()
         return
 
     # No V, J or junction: unplaceable, and HILARy would drop it silently.
     clonotypes = clonotypes[(clonotypes[["v_call", "j_call", "junction"]] != "").all(axis=1)]
     # HILARy trims 3nt per end, so 6nt or less is empty. Renumbered so alignments line up.
     clonotypes = clonotypes[clonotypes["junction"].str.len() > 6].reset_index(drop=True)
+    if clonotypes.empty:
+        no_clonotypes()
+        return
+
+    # HILARy groups by V gene, J gene and CDR3 length, and the adaptive methods raise a
+    # KeyError when no group has two members. Each clonotype is then its own lineage.
+    if args.mode == "adaptive":
+        gene = lambda calls: calls.str.split(",", n=1).str[0].str.split("*", n=1).str[0]
+        largest = clonotypes.groupby(
+            [gene(clonotypes["v_call"]), gene(clonotypes["j_call"]), clonotypes["junction"].str.len()]
+        ).size().max()
+        if largest < 2:
+            reason = "no lineage has more than one clonotype"
+            record_method("singletons", reason)
+            print(f"{reason}: no V gene, J gene and CDR3 length group holds two clonotypes",
+                  file=sys.stderr)
+            progress("Clustering: every clonotype is its own lineage")
+            pd.DataFrame({
+                "sequence_id": clonotypes["sequence_id"],
+                "clone_id": [f"{args.clone_prefix}{i + 1}" for i in range(len(clonotypes))],
+            }).to_csv(args.out_clones, sep="\t", index=False)
+            return
 
     work_dir = args.out_clones.parent / "hilary"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -791,6 +816,9 @@ def collect(args: argparse.Namespace) -> None:
                 _read_donor_file(args.anchor_distances_dir, index, ANCHOR_DISTANCE_COLUMNS))
 
     lineages = _concat(lineage_parts, LINEAGE_FILE_COLUMNS)
+    # Empty donors leave no lineage rows, and the concat then drops the donor column too.
+    if args.donor and "donor" not in lineages.columns:
+        lineages["donor"] = pd.Series(dtype=str)
     nodes = _concat(node_parts, NODE_COLUMNS)
     # Tip labels are prefixed clonotype ids; strip the prefix.
     links = _concat(link_parts, NODE_LINK_FILE_COLUMNS)

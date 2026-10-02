@@ -18,6 +18,7 @@ import {
   createPlDataTableStateV2,
   createPlDataTableV3,
   getAxisId,
+  getUniquePartitionKeys,
   isPColumnSpec,
   parseResourceMap,
 } from "@platforma-sdk/model";
@@ -193,6 +194,12 @@ export type AlignmentSource = "mixcr" | "upstream" | "none";
 
 /** Per donor group, what the overview shows beside its progress. */
 export type DonorStats = { donor: string; clonotype_count: number; lineage_count: number };
+
+/** Picked datasets with samples lacking a donor value, and whether no sample has one. */
+export type SamplesWithoutDonor = {
+  datasets: { dataset: string; missing: number; total: number }[];
+  noneNamed: boolean;
+};
 
 /** What the workflow reports about each dataset of the last run. */
 export type DatasetRun = {
@@ -529,6 +536,44 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     return out;
   })
 
+  /**
+   * Per picked dataset on the donor column's samples, how many of its samples have no donor
+   * value (absent, null or blank). Those samples are left out of clustering; when no sample
+   * has one, nothing can be clustered and the workflow stops with the same message.
+   * Undefined while the donor column or a dataset's samples are not readable yet.
+   */
+  .output("samplesWithoutDonor", (ctx): SamplesWithoutDonor | undefined => {
+    if (ctx.data.donorColumn === undefined) return { datasets: [], noneNamed: false };
+    const donor = ctx.resultPool.getPColumnByRef(ctx.data.donorColumn);
+    const donorAxis = donor?.spec.axesSpec[0];
+    const values = donor?.data?.getDataAsJsonOrUndefined<{ data?: Record<string, unknown> }>()
+      ?.data;
+    if (donorAxis === undefined || values === undefined) return undefined;
+    const named = (sample: string) => {
+      const v = values[JSON.stringify([sample])];
+      return v !== undefined && v !== null && String(v).trim() !== "";
+    };
+    const donorKey = axisKey(donorAxis);
+    const labels = datasetLabels(ctx.resultPool);
+    const out: SamplesWithoutDonor["datasets"] = [];
+    let covered = 0;
+    let namedSamples = 0;
+    for (const ref of canonicalRefs(ctx.data.datasets ?? [])) {
+      const column = ctx.resultPool.getPColumnByRef(ref);
+      // Datasets on another sample axis are reported by datasetsOutsideDonorColumn.
+      if (column === undefined || axisKey(column.spec.axesSpec[0]) !== donorKey) continue;
+      const samples = getUniquePartitionKeys(column.data)?.[0];
+      if (samples === undefined) return undefined;
+      const missing = samples.filter((s) => !named(String(s))).length;
+      covered++;
+      namedSamples += samples.length - missing;
+      if (missing > 0) {
+        out.push({ dataset: labels.get(refKey(ref)) ?? ref.name, missing, total: samples.length });
+      }
+    }
+    return { datasets: out, noneNamed: covered > 0 && namedSamples === 0 };
+  })
+
   /** What ran. Reads `activeArgs` so it matches the results on screen, not unrun edits. */
   .output("modeStatement", (ctx) => {
     const args = ctx.activeArgs;
@@ -546,6 +591,26 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     );
     return describeRun(args, runs, methods, routes);
   })
+
+  /** Donors where every clonotype is its own lineage: no V, J and CDR3-length group held two. */
+  .output("singletonDonors", (ctx): string[] =>
+    donorMap(ctx.outputs, "clusteringMethods", readClusteringMethod)
+      .data.filter((entry) => entry.value.method === "singletons")
+      .map((entry) => String(entry.key[0]))
+      .sort(),
+  )
+
+  /** Donors with no clonotypes in the picked datasets, once clustering has run. */
+  .output("emptyDonors", (ctx): string[] =>
+    (
+      ctx.outputs
+        ?.resolve({ field: "donorStats", allowPermanentAbsence: true, stableIfNotFound: true })
+        ?.getDataAsJson<DonorStats[]>() ?? []
+    )
+      .filter((stats) => stats.clonotype_count === 0)
+      .map((stats) => stats.donor)
+      .sort(),
+  )
 
   /** Per-donor clonotype and lineage counts, once clustering has run. */
   .output("donorStats", (ctx) =>

@@ -6,7 +6,7 @@ import {
   PlMaskIcon24,
   PlSlideModal,
 } from "@platforma-sdk/ui-vue";
-import { reactive, watch } from "vue";
+import { computed, reactive, watch } from "vue";
 import DonorReportPanel from "./DonorReportPanel.vue";
 import DonorTable from "./DonorTable.vue";
 import SettingsPanel from "./SettingsPanel.vue";
@@ -18,6 +18,23 @@ const app = useApp();
 const view = reactive<{ settingsOpen: boolean; reportOpen: boolean; donor?: string }>({
   settingsOpen: (app.model.data.datasets ?? []).length === 0,
   reportOpen: false,
+});
+
+const hasDonorColumn = computed(() => app.model.data.donorColumn !== undefined);
+// Every clonotype is its own lineage: no V, J and CDR3-length group held two.
+const singletonText = computed(() => {
+  const donors = app.model.outputs.singletonDonors ?? [];
+  if (donors.length === 0) return undefined;
+  return hasDonorColumn.value
+    ? `No lineage in ${donors.length === 1 ? "donor" : "donors"} ${donors.join(", ")} has more than one clonotype.`
+    : "No lineage has more than one clonotype.";
+});
+const emptyText = computed(() => {
+  const donors = app.model.outputs.emptyDonors ?? [];
+  if (donors.length === 0 || !hasDonorColumn.value) return undefined;
+  return donors.length === 1
+    ? `Donor ${donors[0]} has no clonotypes in the picked datasets.`
+    : `Donors ${donors.join(", ")} have no clonotypes in the picked datasets.`;
 });
 
 const openReport = (donor: string) => {
@@ -52,8 +69,17 @@ watch(
       and paired single cell are both accepted, imported or from MiXCR; TCR is not.
     </PlAlert>
 
+    <PlAlert v-if="app.model.outputs.samplesWithoutDonor?.noneNamed" type="error">
+      No sample in the picked datasets has a value in the donor column, so nothing can be clustered.
+      Fill in the donor column or clear it in Settings.
+    </PlAlert>
+
+    <PlAlert v-if="singletonText" type="warn">{{ singletonText }}</PlAlert>
+    <PlAlert v-if="emptyText" type="info">{{ emptyText }}</PlAlert>
+
     <!-- A lineage with no tree draws the same empty plot as a broken one, so say which. -->
-    <PlAlert v-if="app.model.outputs.noTreesReason" type="warn">
+    <!-- With single-clonotype lineages that line already says why no tree was built. -->
+    <PlAlert v-if="app.model.outputs.noTreesReason && !singletonText" type="warn">
       {{ app.model.outputs.noTreesReason }} Double-click a donor to open its logs.
     </PlAlert>
 

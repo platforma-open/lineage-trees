@@ -119,6 +119,12 @@ export function useDonorRows() {
         trees: stage("trees", done("clustering"), "Starting"),
         results: results(),
       };
+      // A donor with no clonotypes finishes every stage on nothing; say so rather than "Done".
+      if (stats.get(donor)?.clonotype_count === 0) {
+        for (const { key } of STAGES) {
+          if (progress[key].status === "done") progress[key].text = "No clonotypes";
+        }
+      }
       // The tree tool labels its build "Trees"; say what it is doing.
       if (progress.trees.status === "running") {
         progress.trees.text = progress.trees.text.replace(/^Trees\b/, "Building trees");

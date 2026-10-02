@@ -6,6 +6,7 @@ self := import("@platforma-sdk/workflow-tengo:tpl")
 exec := import("@platforma-sdk/workflow-tengo:exec")
 assets := import("@platforma-sdk/workflow-tengo:assets")
 maps := import("@platforma-sdk/workflow-tengo:maps")
+ll := import("@platforma-sdk/workflow-tengo:ll")
 pcolumn := import("@platforma-sdk/workflow-tengo:pframes.pcolumn")
 text := import("text")
 json := import("json")
@@ -64,10 +65,14 @@ self.body(func(inputs) {
 		donorSet := {}
 		for key, value in inputs.donorColumn.data.getDataAsJson()["data"] {
 			// Metadata may be numeric; donors are named and compared as text throughout.
+			// No value or a blank one is no donor: the sample is left out, as the model warns.
 			if is_undefined(value) {
 				continue
 			}
-			donor := clean(is_string(value) ? value : string(value))
+			donor := text.trim_space(clean(is_string(value) ? value : string(value)))
+			if donor == "" {
+				continue
+			}
 			sample := json.decode(key)[0]
 			for index in covered {
 				sampleToDonor[prefixed(index, sample)] = donor
@@ -76,6 +81,10 @@ self.body(func(inputs) {
 		}
 		// Sorted, so two equivalent runs build the same graph and dedup.
 		donors = maps.getKeys(donorSet)
+		// Otherwise every group would be named by an undefined donor. The model warns before the run.
+		if len(donors) == 0 {
+			ll.panic("No sample in the picked datasets has a value in the donor column, so nothing can be clustered. Fill in the donor column or clear it.")
+		}
 
 		donorsTsv = "sample_id\tdonor\n"
 		for sample in maps.getKeys(sampleToDonor) {

@@ -55,6 +55,7 @@ const hasMixcr = computed(() => datasets.value.some((d) => d.alignmentRoute === 
 // An anchor set is one of the picked datasets, so the second picker offers those.
 const anchorOptions = computed(() => datasets.value.map((d) => ({ ref: d.ref, label: d.label })));
 const outsideDonor = computed(() => app.model.outputs.datasetsOutsideDonorColumn ?? []);
+const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
 </script>
 
 <template>
@@ -73,6 +74,16 @@ const outsideDonor = computed(() => app.model.outputs.datasetsOutsideDonorColumn
   <PlAlert v-if="outsideDonor.length > 0" type="warn">
     The donor column has no samples from {{ outsideDonor.join(", ") }}, so that data is left out of
     clustering. Clear the donor column to cluster everything as one donor.
+  </PlAlert>
+  <PlAlert v-if="withoutDonor?.noneNamed" type="error">
+    No sample in the picked datasets has a value in the donor column, so nothing can be clustered.
+    Fill in the donor column or clear it.
+  </PlAlert>
+  <PlAlert v-else-if="(withoutDonor?.datasets.length ?? 0) > 0" type="warn">
+    <div v-for="d in withoutDonor?.datasets" :key="d.dataset">
+      {{ d.dataset }}: {{ d.missing }} of {{ d.total }} samples have no donor, so they are left out
+      of clustering.
+    </div>
   </PlAlert>
   <PlDropdownMultiRef
     v-model="pickedDatasets"

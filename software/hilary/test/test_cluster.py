@@ -182,6 +182,36 @@ def main(tmp: Path) -> None:
     ok("node metadata with nothing placed still carries the count columns",
        list(got.columns) == ["lineage_id", "node_id", "timepoint", "timepoint__count"])
 
+    # Adaptive mode on a donor with no V, J and CDR3-length group of two: HILARy raises a
+    # KeyError there, so each clonotype becomes its own lineage and the method says so.
+    lone = write(tmp / "lone.tsv", [
+        clono("0_a", "IGHV1-2*02", "IGHJ4*02", BASE),
+        clono("0_b", "IGHV3-23*01", "IGHJ4*02", OTHER),
+        clono("0_c", "IGHV4-34*01", "IGHJ6*02", BASE + "GGG")])
+    stage("cluster", "--clonotypes", lone, "--out-clones", tmp / "lone-clones.tsv",
+          "--out-method", tmp / "lone-method.json", "--mode", "adaptive", "--threads", "1",
+          "--clone-prefix", "D/")
+    lone_clones = read(tmp / "lone-clones.tsv")
+    ok("adaptive with no group of two: every clonotype its own lineage, under the donor prefix",
+       sorted(lone_clones["clone_id"]) == ["D/1", "D/2", "D/3"]
+       and json.loads((tmp / "lone-method.json").read_text())["method"] == "singletons")
+
+    # A donor column with no lineage at all: collect must still report the donor, empty.
+    empty = tmp / "empty-collect"
+    for d in ("lineages", "nodes", "node-links", "out"):
+        (empty / d).mkdir(parents=True)
+    stage("collect", "--lineages-dir", empty / "lineages", "--nodes-dir", empty / "nodes",
+          "--node-links-dir", empty / "node-links",
+          "--abundance", write(empty / "abundance.tsv", [{"sample_id": "0_s1", "sequence_id": "0_a", "abundance": 1}]),
+          "--donors", write(empty / "donors.tsv", [{"sample_id": "0_s1", "donor": "A"}]),
+          "--clonotypes", write(empty / "clonotypes.tsv", [{"sequence_id": "0_a"}]),
+          "--donor", "A", "--dataset", "0", "--per-dataset-dir", empty / "out",
+          "--out-nodes", empty / "nodes.tsv", "--out-lineage-stats", empty / "stats.tsv",
+          "--out-donor-stats", empty / "donor-stats.json")
+    ok("collect with a donor column and no lineage reports the donor with nothing in it",
+       json.loads((empty / "donor-stats.json").read_text())
+       == [{"donor": "A", "clonotype_count": 0, "lineage_count": 0}])
+
     # A node's datasets, from merge's data_source, in the pass that counts its clonotypes.
     placed = pd.DataFrame({"sequence_id": ["0_a", "1_b"], "lineage_id": ["L1", "L1"],
                            "abundance": [2.0, 3.0]})
