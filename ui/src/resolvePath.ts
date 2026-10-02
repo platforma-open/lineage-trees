@@ -23,7 +23,9 @@ export async function resolvePath(
   const parentOf = read.get(columns.topologyId);
   if (!parentOf) throw new Error("this tree's topology is not available");
   const labelOf = (columns.labelId && read.get(columns.labelId)) || new Map<string, string>();
-  if (!parentOf.has(nodeId) && !labelOf.has(nodeId)) {
+  // The root has no parent and no label, but is some node's parent.
+  const isRoot = !parentOf.has(nodeId) && [...parentOf.values()].includes(nodeId);
+  if (!parentOf.has(nodeId) && !labelOf.has(nodeId) && !isRoot) {
     throw new Error("that node is not part of this lineage's tree");
   }
 
@@ -41,6 +43,6 @@ export async function resolvePath(
   nodeIds.reverse();
 
   // Observed nodes are named by clonotype; inferred ones by their step on the path.
-  const nodeLabel = labelOf.get(nodeId) ?? `Step ${nodeIds.length - 1}`;
+  const nodeLabel = labelOf.get(nodeId) || (isRoot ? "Root" : `Step ${nodeIds.length - 1}`);
   return { nodeIds, nodeLabel };
 }
