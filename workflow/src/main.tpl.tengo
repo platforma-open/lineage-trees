@@ -13,6 +13,7 @@ pSpec := import("@platforma-sdk/workflow-tengo:pframes.spec")
 xsv := import("@platforma-sdk/workflow-tengo:pframes.xsv")
 maps := import("@platforma-sdk/workflow-tengo:maps")
 ll := import("@platforma-sdk/workflow-tengo:ll")
+datasetLabels := import(":dataset-labels")
 
 perDonorTpl := assets.importTemplate(":per-donor")
 soiTpl := assets.importTemplate(":soi")
@@ -173,21 +174,6 @@ wf.body(func(args) {
 	metadataHeaders := {}
 	metadataLabels := {}
 
-	// Dataset label from its trace, as the table derives "Members" headings, so both agree.
-	// Highest importance wins; ties go to the later step (nearest this block).
-	datasetLabel := func(spec, fallback) {
-		best := ""
-		bestImportance := -1
-		for step in pSpec.makeTrace(spec).value {
-			importance := is_undefined(step.importance) ? 0 : step.importance
-			if importance >= bestImportance {
-				bestImportance = importance
-				best = step.label
-			}
-		}
-		return best == "" ? fallback : best
-	}
-
 	describeDataset := func(i) {
 		// Only the abundance column carries both axes; the others sit on the clonotype axis.
 		abundanceColumn := columns.getColumn(bundleKey("abundance", i))
@@ -339,6 +325,18 @@ wf.body(func(args) {
 	for i := 0; i < datasetCount; i++ {
 		datasets = append(datasets, describeDataset(i))
 	}
+	// One distinct name per dataset from the abundance column's trace, derived as tables
+	// derive headings, so the names here and the "Members" headings agree.
+	traces := []
+	fallbacks := []
+	for ds in datasets {
+		traces = append(traces, pSpec.makeTrace(ds.abundanceColumn.spec).value)
+		fallbacks = append(fallbacks, "Dataset " + string(ds.index))
+	}
+	names := datasetLabels.distinctLabels(traces, fallbacks)
+	for k, name in names {
+		datasets[k].label = name
+	}
 
 	// Light chains are resolved if any dataset carries them, anchor sets included;
 	// bulk members then join with the light half unknown.
@@ -365,7 +363,7 @@ wf.body(func(args) {
 			arg("--dataset").arg(idx).
 			arg("clonotypes-" + idx + ".tsv").
 			arg("abundance-" + idx + ".tsv").
-			arg(datasetLabel(ds.abundanceColumn.spec, "Dataset " + idx))
+			arg(ds.label)
 		if ds.isAnchor {
 			mergeCmd.arg("--anchor").arg(idx)
 		}
@@ -1144,7 +1142,9 @@ wf.body(func(args) {
 	anchorLinks := {}
 	for ds in datasets {
 		idx := string(ds.index)
-		dsTrace := pSpec.makeTrace(ds.clonotypeAxisSpec, traceStep)
+		// From the abundance column: the clonotype axis carries no trace, so columns of two
+		// datasets would be told apart by nothing.
+		dsTrace := pSpec.makeTrace(ds.abundanceColumn.spec, traceStep)
 
 		// Tree distance to the nearest anchor. Skipped for anchor datasets, where it is blank.
 		if anyAnchor && !ds.isAnchor {
@@ -1202,7 +1202,7 @@ wf.body(func(args) {
 		// Each dataset's column is labelled "Members"; the dataset trace tells them apart.
 		// Left out with one dataset: it would repeat the lineage's clonotype count.
 		if datasetCount > 1 {
-			maps.forEach(traced(pSpec.makeTrace(ds.abundanceColumn.spec, traceStep),
+			maps.forEach(traced(dsTrace,
 				xsv.importFile(perDonor.output("memberCounts-" + idx), "tsv", {
 					axes: [{ column: "lineage_id", spec: lineageAxisSpec }],
 					columns: [{

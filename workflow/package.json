@@ -6,7 +6,8 @@
   "scripts": {
     "build": "shx rm -rf dist && pl-tengo build",
     "check": "pl-tengo imports && pl-tengo check",
-    "format": "/usr/bin/env emacs --script ./format.el || echo 'No emacs.'"
+    "format": "/usr/bin/env emacs --script ./format.el || echo 'No emacs.'",
+    "test": "pl-tengo test"
   },
   "dependencies": {
     "@platforma-open/milaboratories.lineage-trees.hilary": "workspace:*",

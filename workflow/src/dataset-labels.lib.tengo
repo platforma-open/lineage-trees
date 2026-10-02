@@ -1,0 +1,192 @@
+// Distinct names for the picked datasets, from their traces: the SDK's label derivation
+// (sdk/model/src/labels/derive_distinct_labels.ts) cut to what dataset names need. The most
+// important trace steps are tried first, more are added until every name differs, then any
+// step the names do not need is dropped. The column's own label and linker postfixes are left
+// out: an abundance column's label names the measure, not the dataset.
+
+slices := import("@platforma-sdk/workflow-tengo:slices")
+text := import("text")
+
+SEPARATOR := " / "
+// Same as the SDK: between steps of equal importance, the one nearer the end wins.
+DISTANCE_PENALTY := 0.001
+
+// trace: a list of steps {type, label, importance}. Each gets its type keyed by how often
+// that type recurs counting from the end, as the SDK does.
+_record := func(trace) {
+	out := []
+	seen := {}
+	for i := len(trace) - 1; i >= 0; i-- {
+		step := trace[i]
+		n := is_undefined(seen[step.type]) ? 1 : seen[step.type] + 1
+		seen[step.type] = n
+		out = append(out, {
+			fullType: step.type + "@" + string(n),
+			label: step.label,
+			importance: is_undefined(step.importance) ? 0 : step.importance,
+			position: i,
+			length: len(trace)
+		})
+	}
+	return slices.reverse(out)
+}
+
+keys := func(m) {
+	out := []
+	for k, _ in m {
+		out = append(out, k)
+	}
+	return out
+}
+
+_render := func(record, included) {
+	parts := []
+	for step in record {
+		if included[step.fullType] {
+			parts = append(parts, step.label)
+		}
+	}
+	return len(parts) == 0 ? undefined : text.join(parts, SEPARATOR)
+}
+
+// undefined when a name would be empty, unless forced (then it is left empty).
+_build := func(records, included, force) {
+	out := []
+	for r in records {
+		name := _render(r, included)
+		if is_undefined(name) {
+			if !force {
+				return undefined
+			}
+			name = ""
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+_distinct := func(names) {
+	if is_undefined(names) {
+		return 0
+	}
+	seen := {}
+	for n in names {
+		seen[n] = true
+	}
+	return len(seen)
+}
+
+_setOf := func(types) {
+	out := {}
+	for t in types {
+		out[t] = true
+	}
+	return out
+}
+
+// Drops, least important first, every type the names do not need to stay as distinct.
+_minimize := func(records, types, importance) {
+	target := _distinct(_build(records, _setOf(types), false))
+	kept := slices.quickSortFn(types, func(a, b) { return importance[a] < importance[b] })
+	for t in slices.quickSortFn(types, func(a, b) { return importance[a] < importance[b] }) {
+		candidate := slices.filter(kept, func(x) { return x != t })
+		if _distinct(_build(records, _setOf(candidate), false)) >= target {
+			kept = candidate
+		}
+	}
+	return kept
+}
+
+// One distinct name per trace, in the traces' order. `fallbacks[i]` names a dataset with no
+// trace, and tells apart any names the traces cannot.
+distinctLabels := func(traces, fallbacks) {
+	// Only traced datasets take part; an untraced one is named by its fallback.
+	traced := []
+	records := []
+	for i, t in traces {
+		if len(t) > 0 {
+			traced = append(traced, i)
+			records = append(records, _record(t))
+		}
+	}
+	total := len(records)
+
+	importance := {}
+	count := {}
+	for r in records {
+		for step in r {
+			score := step.importance - (step.length - step.position) * DISTANCE_PENALTY
+			if is_undefined(importance[step.fullType]) || score > importance[step.fullType] {
+				importance[step.fullType] = score
+			}
+			count[step.fullType] = is_undefined(count[step.fullType]) ? 1 : count[step.fullType] + 1
+		}
+	}
+	// Most important first; the type name breaks ties so the order never depends on map order.
+	types := slices.quickSortFn(keys(importance), func(a, b) {
+		if importance[a] != importance[b] {
+			return importance[a] > importance[b]
+		}
+		return a < b
+	})
+	main := []
+	secondary := []
+	for t in types {
+		if text.has_suffix(t, "@1") || count[t] == total {
+			main = append(main, t)
+		} else {
+			secondary = append(secondary, t)
+		}
+	}
+
+	names := undefined
+	if len(main) > 0 {
+		included := 0
+		extra := -1
+		for included < len(main) {
+			// A copy: appending to a slice of `main` would write into `main` itself.
+			current := copy(slices.slice(main, 0, included))
+			if extra >= 0 {
+				current = append(current, main[extra])
+			}
+			if _distinct(_build(records, _setOf(current), false)) == total {
+				names = _build(records, _setOf(_minimize(records, current, importance)), false)
+				break
+			}
+			extra++
+			if extra >= len(main) {
+				included++
+				extra = included
+			}
+		}
+		if is_undefined(names) {
+			names = _build(records, _setOf(_minimize(records, main + secondary, importance)), true)
+		}
+	} else {
+		names = _build(records, {}, true)
+	}
+	if total == 0 {
+		names = []
+	}
+
+	// Back in the traces' order. An empty name takes its fallback; names still equal, or
+	// equal to an untraced dataset's fallback, carry it too, so none collide.
+	out := copy(fallbacks)
+	for k, i in traced {
+		out[i] = names[k] == "" ? fallbacks[i] : names[k]
+	}
+	seen := {}
+	for n in out {
+		seen[n] = is_undefined(seen[n]) ? 1 : seen[n] + 1
+	}
+	for k, i in traced {
+		if names[k] != "" && seen[out[i]] > 1 {
+			out[i] = out[i] + " (" + fallbacks[i] + ")"
+		}
+	}
+	return out
+}
+
+export {
+	distinctLabels: distinctLabels
+}

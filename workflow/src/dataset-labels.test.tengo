@@ -1,0 +1,57 @@
+test := import("@platforma-sdk/workflow-tengo:test")
+labels := import(":dataset-labels")
+
+// Trace steps as MiXCR clonotyping datasets carry them: the samples-and-data dataset, the
+// clonotyping block, then the chain, the most important.
+dataset := func(name) { return { type: "milaboratories.samples-and-data", label: name, importance: 10 } }
+mixcr := func(name) { return { type: "milaboratories.mixcr-clonotyping", label: name, importance: 20 } }
+chain := { type: "milaboratories.mixcr-clonotyping.chain", label: "IG Heavy", importance: 70 }
+
+Test_twoBulkRuns_areNamedByWhatDiffers_notByTheChain := func() {
+	got := labels.distinctLabels([
+		[dataset("Alpaca"), mixcr("MiXCR, VDJRegion"), chain],
+		[dataset("Alpaca"), mixcr("MiXCR, CDR3"), chain]
+	], ["Dataset 0", "Dataset 1"])
+	test.isEqual(["MiXCR, VDJRegion", "MiXCR, CDR3"], got, "named by the clonotyping run")
+}
+
+Test_sameRunOverTwoDatasets_isNamedByTheDataset := func() {
+	got := labels.distinctLabels([
+		[dataset("Donor 1 bulk"), mixcr("MiXCR"), chain],
+		[dataset("Donor 1 mAbs"), mixcr("MiXCR"), chain]
+	], ["Dataset 0", "Dataset 1"])
+	test.isEqual(["Donor 1 bulk", "Donor 1 mAbs"], got, "named by the samples-and-data dataset")
+}
+
+Test_bothDiffer_theMostImportantDifferenceIsEnough := func() {
+	got := labels.distinctLabels([
+		[dataset("A"), mixcr("Run 1"), chain],
+		[dataset("B"), mixcr("Run 2"), chain]
+	], ["Dataset 0", "Dataset 1"])
+	test.isEqual(["Run 1", "Run 2"], got, "the clonotyping step outranks the dataset step")
+}
+
+Test_oneDataset_takesItsMostImportantStep := func() {
+	got := labels.distinctLabels([[dataset("Alpaca"), mixcr("MiXCR"), chain]], ["Dataset 0"])
+	test.isEqual(["IG Heavy"], got, "a single dataset needs nothing told apart")
+}
+
+Test_noTrace_takesItsFallback := func() {
+	got := labels.distinctLabels([[], [dataset("A"), chain]], ["Dataset 0", "Dataset 1"])
+	test.isEqual(["Dataset 0", "IG Heavy"], got, "an untraced dataset is named by its fallback")
+}
+
+Test_identicalTraces_stillGetDistinctNames := func() {
+	same := [dataset("Alpaca"), mixcr("MiXCR"), chain]
+	got := labels.distinctLabels([same, same], ["Dataset 0", "Dataset 1"])
+	test.isEqual(["IG Heavy (Dataset 0)", "IG Heavy (Dataset 1)"], got, "the fallback tells them apart")
+}
+
+Test_noSingleStepSuffices_twoAreCombinedInTraceOrder := func() {
+	got := labels.distinctLabels([
+		[dataset("A"), mixcr("Run 1"), chain],
+		[dataset("A"), mixcr("Run 2"), chain],
+		[dataset("B"), mixcr("Run 1"), chain]
+	], ["Dataset 0", "Dataset 1", "Dataset 2"])
+	test.isEqual(["A / Run 1", "A / Run 2", "B / Run 1"], got, "dataset and run together")
+}
