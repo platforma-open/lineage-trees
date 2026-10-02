@@ -950,13 +950,13 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   .sections((ctx) => {
     const trees = currentViews(ctx.data.treeViews, runIdOf(ctx.outputs)).map((v) => ({
       type: "link" as const,
-      href: `/tree?id=${v.id}` as const,
+      href: `/tree?id=${encodeURIComponent(v.id)}` as const,
       label: v.state.title,
     }));
     // The lineage it belongs to, and the node it ends at once one is chosen.
     const paths = currentViews(ctx.data.pathViews, runIdOf(ctx.outputs)).map((v) => ({
       type: "link" as const,
-      href: `/path?id=${v.id}` as const,
+      href: `/path?id=${encodeURIComponent(v.id)}` as const,
       label: v.nodeLabel ? `Path / ${v.lineageLabel} / ${v.nodeLabel}` : `Path / ${v.lineageLabel}`,
     }));
     const baskets = (ctx.data.baskets ?? []).map((b) => ({

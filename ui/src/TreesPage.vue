@@ -52,7 +52,7 @@ const onLineageClicked = async (key?: PTableKey) => {
       state: { title: lineageTitle(lineageId), template: "dendro" },
     });
   }
-  await app.navigateTo(`/tree?id=${id}`);
+  await app.navigateTo(`/tree?id=${encodeURIComponent(id)}`);
 };
 </script>
 

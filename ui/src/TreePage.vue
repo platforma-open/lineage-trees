@@ -171,7 +171,7 @@ const openPath = async (clicked: unknown) => {
       return;
     }
   }
-  await app.navigateTo(`/path?id=${id}`);
+  await app.navigateTo(`/path?id=${encodeURIComponent(id)}`);
 };
 
 const TOOLTIP_BUTTONS = [
