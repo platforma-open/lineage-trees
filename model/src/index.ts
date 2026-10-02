@@ -532,15 +532,27 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     }),
   )
 
-  /** Sample columns that can name a donor: `pl7.app/metadata` or `pl7.app/label`. */
-  .output("donorOptions", (ctx) =>
-    ctx.resultPool.getOptions((spec) => {
+  /**
+   * Sample columns that can name a donor: `pl7.app/metadata` or `pl7.app/label`, on the sample
+   * axis of a picked dataset or of the chosen column, so the choice stays listed. All of them
+   * before anything is picked.
+   */
+  .output("donorOptions", (ctx) => {
+    const sampleAxes = new Set<string>();
+    const refs = [...(ctx.data.datasets ?? []), ...(ctx.data.donorColumn ? [ctx.data.donorColumn] : [])];
+    for (const ref of refs) {
+      const axis = ctx.resultPool.getPColumnSpecByRef(ref)?.axesSpec[0];
+      if (axis !== undefined) sampleAxes.add(axisKey(axis));
+    }
+    return ctx.resultPool.getOptions((spec) => {
       if (!isPColumnSpec(spec)) return false;
       if (spec.axesSpec.length !== 1) return false;
-      if (spec.axesSpec[0]?.name !== "pl7.app/sampleId") return false;
-      return spec.name === "pl7.app/metadata" || spec.name === "pl7.app/label";
-    }),
-  )
+      const axis = spec.axesSpec[0];
+      if (axis?.name !== "pl7.app/sampleId") return false;
+      if (spec.name !== "pl7.app/metadata" && spec.name !== "pl7.app/label") return false;
+      return sampleAxes.size === 0 || sampleAxes.has(axisKey(axis));
+    });
+  })
 
   /** Picked datasets in `args` order; picks whose spec left the pool are dropped. */
   .output("datasets", (ctx): DatasetInfo[] => {
