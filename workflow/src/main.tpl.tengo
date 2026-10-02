@@ -5,6 +5,7 @@
 wf := import("@platforma-sdk/workflow-tengo:workflow")
 assets := import("@platforma-sdk/workflow-tengo:assets")
 exec := import("@platforma-sdk/workflow-tengo:exec")
+f := exec.formula
 text := import("text")
 render := import("@platforma-sdk/workflow-tengo:render")
 smart := import("@platforma-sdk/workflow-tengo:smart")
@@ -353,13 +354,21 @@ wf.body(func(args) {
 	// cannot collide, and tags each row with its dataset and kind of data.
 	mergeCmd := exec.builder().
 		software(hilarySw).
+		// Measured at about 2.2x its inputs; doubled for headroom.
+		resources({
+			onCPU: {
+				cpu: 1,
+				ram: f.size("mergeInput").times(4).plus(f.mib(512)).
+					between(f.gib(1), f.gib(256)).staticFallback(f.gib(4))
+			}
+		}).
 		arg("merge").
 		arg("--out-clonotypes").arg("clonotypes.tsv").
 		arg("--out-abundance").arg("abundance.tsv")
 	for ds in datasets {
 		idx := string(ds.index)
-		mergeCmd.addFile("clonotypes-" + idx + ".tsv", ds.clonotypeTable).
-			addFile("abundance-" + idx + ".tsv", ds.abundanceTable).
+		mergeCmd.addFile("clonotypes-" + idx + ".tsv", ds.clonotypeTable, { tag: "mergeInput" }).
+			addFile("abundance-" + idx + ".tsv", ds.abundanceTable, { tag: "mergeInput" }).
 			arg("--dataset").arg(idx).
 			arg("clonotypes-" + idx + ".tsv").
 			arg("abundance-" + idx + ".tsv").

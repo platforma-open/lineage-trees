@@ -1339,8 +1339,9 @@ POOL_EXPORTS <- c("attempt_build", "usable_build", "why_build", "build_lineage",
                   "NODE_COLUMNS", "SETTLED_AA", "translate_all", "CODON_TABLE", "GAP_AA",
                   "AMBIGUOUS_AA")
 
-# A worker is about 1 GiB with dowser attached, plus room for a large build.
-WORKER_BUDGET <- 1.5 * 2^30
+# Workers settle near 1.9 GiB at any lineage size and reach 2.8 GiB on the largest
+#; 1.5 GiB let the pool fill 83-97% of its limit.
+WORKER_BUDGET <- 2.5 * 2^30
 fit_pool <- function(want) {
   limit <- memory_limit()
   rss <- self_rss()
