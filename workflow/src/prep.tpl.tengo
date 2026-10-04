@@ -1,0 +1,90 @@
+// One donor's alignment and allele inference. Pure, and its outputs are kept by the block,
+// so a run that changes only later settings reuses them.
+
+self := import("@platforma-sdk/workflow-tengo:tpl")
+
+exec := import("@platforma-sdk/workflow-tengo:exec")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+maps := import("@platforma-sdk/workflow-tengo:maps")
+
+immcantationSw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.immcantation:main")
+allelesSw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.immcantation:alleles")
+
+f := exec.formula
+
+self.defineOutputs("clonotypes", "aligned", "route", "alignLog", "allelesLog")
+
+self.body(func(inputs) {
+	clonotypes := inputs.clonotypes
+
+	// Join alignments (AIRR exports or upstream columns) and rebuild every row around its
+	// junction, first: allele inference, HILARy adaptive and the trees all read these rows.
+	alignStage := exec.builder().
+		software(immcantationSw).
+		resources({
+			onCPU: {
+				cpu: 2,
+				// Measured at 6.7x + 0.6 GiB.
+				ram: f.size("clonotypes").times(10).plus(f.gib(1)).
+					between(f.gib(2), f.gib(256)).staticFallback(f.gib(6))
+			}
+		}).
+		addFile("clonotypes.tsv", clonotypes, { tag: "clonotypes" }).
+		arg("--stage").arg("align").
+		arg("--threads").arg("2").
+		arg("--clonotypes").arg("clonotypes.tsv").
+		arg("--out-aligned").arg("aligned.tsv").
+		arg("--out-log").arg("align.log").
+		saveFile("aligned.tsv").
+		saveFile("align.log").
+		saveStdoutStream().
+		printErrStreamToStdout()
+	if inputs.params.useLightChains {
+		alignStage.arg("--light-chains")
+	}
+	if len(inputs.airr) > 0 {
+		alignStage.arg("--airr-dir").arg("airr")
+		// Sized with the clonotypes: for MiXCR datasets these carry the alignments and most bytes.
+		maps.forEach(inputs.airr, func(name, file) {
+			alignStage.addFile("airr/" + name, file, { tag: "clonotypes" })
+		})
+	}
+	alignedRun := alignStage.run()
+
+	// Rewrites the aligned rows' V germlines and the clonotype calls with the donor's alleles.
+	allelesRun := exec.builder().
+		software(allelesSw).
+		resources({
+			onCPU: {
+				cpu: 4,
+				// Measured at 6.5x + 1.35 GiB when TIgGER runs.
+				ram: f.size("alleleInput").times(10).plus(f.gib(2)).
+					between(f.gib(3), f.gib(256)).staticFallback(f.gib(12))
+			}
+		}).
+		addFile("clonotypes.tsv", clonotypes, { tag: "alleleInput" }).
+		addFile("aligned.tsv", alignedRun.getFile("aligned.tsv"), { tag: "alleleInput" }).
+		addFile("align.log", alignedRun.getFile("align.log")).
+		// Separate output names: added files are read-only in the working directory.
+		arg("--clonotypes").arg("clonotypes.tsv").
+		arg("--aligned").arg("aligned.tsv").
+		arg("--align-log").arg("align.log").
+		arg("--out").arg("with-alleles.tsv").
+		arg("--out-aligned").arg("aligned-alleles.tsv").
+		arg("--out-route").arg("route.json").
+		arg("--threads").arg("4").
+		saveFile("with-alleles.tsv").
+		saveFile("aligned-alleles.tsv").
+		saveFileContent("route.json").
+		saveStdoutStream().
+		printErrStreamToStdout().
+		run()
+
+	return {
+		clonotypes: allelesRun.getFile("with-alleles.tsv"),
+		aligned: allelesRun.getFile("aligned-alleles.tsv"),
+		route: allelesRun.getFileContent("route.json"),
+		alignLog: alignedRun.getStdoutStream(),
+		allelesLog: allelesRun.getStdoutStream()
+	}
+})

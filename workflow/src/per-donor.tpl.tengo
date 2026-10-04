@@ -1,5 +1,6 @@
 // Per-donor alleles, alignment, clustering and trees; no lineage spans donors.
-// Ephemeral: the donor count is data. Ids are position-prefixed; `collect` splits datasets back out.
+// Ephemeral: the donor count is data. It only dispatches: the work runs in pure stage templates
+// whose outputs the block keeps. Ids are position-prefixed; `collect` splits datasets back out.
 
 self := import("@platforma-sdk/workflow-tengo:tpl")
 
@@ -7,14 +8,19 @@ exec := import("@platforma-sdk/workflow-tengo:exec")
 assets := import("@platforma-sdk/workflow-tengo:assets")
 maps := import("@platforma-sdk/workflow-tengo:maps")
 ll := import("@platforma-sdk/workflow-tengo:ll")
+render := import("@platforma-sdk/workflow-tengo:render")
 pcolumn := import("@platforma-sdk/workflow-tengo:pframes.pcolumn")
 text := import("text")
 json := import("json")
 
 hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.hilary:main")
-immcantationSw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.immcantation:main")
-allelesSw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.immcantation:alleles")
 mixcrSw := assets.importSoftware("@platforma-open/milaboratories.software-mixcr:memory-from-limits")
+
+// Pure stages, split where the settings split, so a change reruns only its stage and later ones.
+prepTpl := assets.importTemplate(":prep")
+clusterTpl := assets.importTemplate(":cluster")
+treesTpl := assets.importTemplate(":trees")
+collectTpl := assets.importTemplate(":collect")
 
 // Formulas read a tagged input's size at exec time, so requests follow each donor's data.
 f := exec.formula
@@ -22,12 +28,10 @@ f := exec.formula
 self.awaitState("params", "ResourceReady")
 // InputsLocked: per-sample file refs must be iterable, but content is not read here.
 self.awaitState("clns", { wildcard: "*" }, "InputsLocked")
-self.awaitState("clonotypeTable", "ResourceReady")
-self.awaitState("abundanceTable", "ResourceReady")
-self.awaitState("annotationsTable", "ResourceReady")
-self.awaitState("anchorsTable", "ResourceReady")
 // Null resource when no donor column is picked.
 self.awaitState("donorColumn", "ResourceReady")
+// The tables are only handed on, so they are not awaited: waiting would make the merge run
+// even when every stage is recovered.
 
 // Same prefix `merge` put on every id.
 prefixed := func(index, id) {
@@ -46,7 +50,6 @@ axisKey := func(axis) {
 
 self.body(func(inputs) {
 	params := inputs.params
-	runsIgPhyML := params.igPhyMLScope != "none"
 
 	// With no donor column the whole input is one unnamed group.
 	donors := []
@@ -155,80 +158,37 @@ self.body(func(inputs) {
 		})
 	}
 
-	collectCmd := exec.builder().
-		software(hilarySw).
-		// Every donor's tree output at once. Measured at 3 sizes only.
-		resources({
-			onCPU: {
-				cpu: 1,
-				ram: f.size("collectInput").times(6).plus(f.gib(1)).
-					between(f.gib(2), f.gib(256)).staticFallback(f.gib(6))
-			}
-		}).
-		addFile("abundance.tsv", inputs.abundanceTable, { tag: "collectInput" }).
-		addFile("annotations.tsv", inputs.annotationsTable, { tag: "collectInput" }).
-		arg("--annotations").arg("annotations.tsv").
-		arg("collect").
-		arg("--clonotypes-dir").arg("clonotypes").
-		arg("--out-node-properties").arg("node-properties.tsv").
-		arg("--out-node-metadata").arg("node-metadata.tsv").
-		arg("--out-node-abundance").arg("node-abundance.tsv").
-		arg("--lineages-dir").arg("lineages").
-		arg("--nodes-dir").arg("nodes").
-		arg("--node-links-dir").arg("node-links").
-		arg("--builders-dir").arg("builders").
-		arg("--aa-cdist-dir").arg("aa-cdist").
-		arg("--germline-mutations-dir").arg("germline-mutations").
-		arg("--consensus-dir").arg("consensus").
-		arg("--anchor-distances-dir").arg("anchor-distances").
-		arg("--abundance").arg("abundance.tsv").
-		arg("--out-nodes").arg("nodes.tsv").
-		arg("--out-lineage-stats").arg("lineage-stats.tsv").
-		arg("--out-donor-stats").arg("donor-stats.json").
-		arg("--out-run-id").arg("run-id.json").
-		arg("--per-dataset-dir").arg("per-dataset").
-		arg("--logs-dir").arg("logs").
-		arg("--out-log").arg("trees.log")
-	for ds in params.datasets {
-		collectCmd.arg("--dataset").arg(ds.index)
-		// So link files exist for every picked pair, even ones the data leaves empty.
-		if ds.isAnchor {
-			collectCmd.arg("--anchor").arg(ds.index)
-		}
+	stageNames := {
+		prep: ["clonotypes", "aligned", "route", "alignLog", "allelesLog"],
+		cluster: ["clones", "method", "log"],
+		trees: ["lineages", "nodes", "nodeLinks", "builders", "aaCdist", "germlineMutations",
+			"consensus", "anchorDistances", "treesLog", "log"],
+		collect: ["nodes", "lineageStats", "nodeProperties", "nodeMetadata", "nodeAbundance",
+			"donorStats", "runId", "treesLog", "log", "perDataset"]
 	}
-	for ds in params.datasets {
-		if ds.hasSampleMetadata {
-			collectCmd.addFile("sample-metadata-" + ds.index + ".tsv", inputs.sampleMetadata[ds.index]).
-				arg("--sample-metadata").arg(ds.index).arg("sample-metadata-" + ds.index + ".tsv")
+	outputsOf := func(stage, r) {
+		out := {}
+		for name in stageNames[stage] {
+			out[name] = r.output(name)
 		}
+		return out
 	}
 
-	if params.hasDonorColumn {
-		collectCmd.writeFile("donors.tsv", donorsTsv)
-		collectCmd.arg("--donors").arg("donors.tsv")
-		for donor in donors {
-			collectCmd.arg("--donor").arg(donor)
-		}
-	}
-
+	// Every stage output, held as a block output so the next run recovers the stages.
+	resultsToCache := {}
+	donorFiles := {}
 	for i := 0; i < groupCount; i++ {
 		suffix := "donor-" + string(i) + ".tsv"
-		clonotypes := split.getFile("split/" + suffix)
 
 		// TIgGER pooled per donor. MiXCR findAlleles rejects mixed feature sets, so it would split a donor by dataset.
 
-		donorClns := []
-		for entry in allClns {
-			if inGroup(i, entry.sample) {
-				donorClns = append(donorClns, entry)
-			}
-		}
-
 		// Named by dataset: two MiXCR runs over one sample share V, J, junction tuples
 		// but not clonotypes, so the tree step matches rows within a dataset only.
-
-		airrFiles := []
-		for entry in donorClns {
+		airrFiles := {}
+		for entry in allClns {
+			if !inGroup(i, entry.sample) {
+				continue
+			}
 			airr := exec.builder().
 				software(mixcrSw).
 				secret("MI_LICENSE", "MI_LICENSE").
@@ -240,212 +200,71 @@ self.body(func(inputs) {
 				saveFile("airr.tsv").
 				printErrStreamToStdout().
 				run()
-			airrFiles = append(airrFiles, { name: entry.name + ".tsv", file: airr.getFile("airr.tsv") })
+			airrFiles[entry.name + ".tsv"] = airr.getFile("airr.tsv")
 		}
 
-		// Join alignments (AIRR exports or upstream columns) and rebuild every row around its
-		// junction, first: allele inference, HILARy adaptive and the trees all read these rows.
-		alignStage := exec.builder().
-			software(immcantationSw).
-			resources({
-				onCPU: {
-					cpu: 2,
-					// Measured at 6.7x + 0.6 GiB.
-					ram: f.size("clonotypes").times(10).plus(f.gib(1)).
-						between(f.gib(2), f.gib(256)).staticFallback(f.gib(6))
-				}
-			}).
-			addFile("clonotypes.tsv", clonotypes, { tag: "clonotypes" }).
-			arg("--stage").arg("align").
-			arg("--threads").arg("2").
-			arg("--clonotypes").arg("clonotypes.tsv").
-			arg("--out-aligned").arg("aligned.tsv").
-			arg("--out-log").arg("align.log").
-			saveFile("aligned.tsv").
-			saveFile("align.log").
-			saveStdoutStream().
-			printErrStreamToStdout()
-		if params.useLightChains {
-			alignStage.arg("--light-chains")
-		}
-		if len(airrFiles) > 0 {
-			alignStage.arg("--airr-dir").arg("airr")
-			// Sized with the clonotypes: for MiXCR datasets these carry the alignments and most bytes.
-			for airr in airrFiles {
-				alignStage.addFile("airr/" + airr.name, airr.file, { tag: "clonotypes" })
+		prep := outputsOf("prep", render.create(prepTpl, {
+			clonotypes: split.getFile("split/" + suffix),
+			airr: airrFiles,
+			params: { useLightChains: params.useLightChains }
+		}))
+		cluster := outputsOf("cluster", render.create(clusterTpl, {
+			clonotypes: prep.clonotypes,
+			aligned: prep.aligned,
+			params: {
+				clusteringMode: params.clusteringMode,
+				clusteringThreshold: params.clusteringThreshold,
+				precision: params.precision,
+				sensitivity: params.sensitivity,
+				clonePrefix: params.hasDonorColumn ? donors[i] + "/" : ""
 			}
-		}
-		alignedRun := alignStage.run()
-		alignmentsLogs.add([groupName(i)], alignedRun.getStdoutStream())
-
-		// Rewrites the aligned rows' V germlines and the clonotype calls with the donor's alleles.
-		alleles := exec.builder().
-			software(allelesSw).
-			resources({
-				onCPU: {
-					cpu: 4,
-					// Measured at 6.5x + 1.35 GiB when TIgGER runs.
-					ram: f.size("alleleInput").times(10).plus(f.gib(2)).
-						between(f.gib(3), f.gib(256)).staticFallback(f.gib(12))
-				}
-			}).
-			addFile("clonotypes.tsv", clonotypes, { tag: "alleleInput" }).
-			addFile("aligned.tsv", alignedRun.getFile("aligned.tsv"), { tag: "alleleInput" }).
-			addFile("align.log", alignedRun.getFile("align.log")).
-			// Separate output names: added files are read-only in the working directory.
-			arg("--clonotypes").arg("clonotypes.tsv").
-			arg("--aligned").arg("aligned.tsv").
-			arg("--align-log").arg("align.log").
-			arg("--out").arg("with-alleles.tsv").
-			arg("--out-aligned").arg("aligned-alleles.tsv").
-			arg("--out-route").arg("route.json").
-			arg("--threads").arg("4").
-			saveFile("with-alleles.tsv").
-			saveFile("aligned-alleles.tsv").
-			saveFileContent("route.json").
-			saveStdoutStream().
-			printErrStreamToStdout()
-		allelesRun := alleles.run()
-		allelesLogs.add([groupName(i)], allelesRun.getStdoutStream())
-		clonotypes = allelesRun.getFile("with-alleles.tsv")
-		alleleRoutes.add([groupName(i)], allelesRun.getFileContent("route.json"))
-		alignedTable := allelesRun.getFile("aligned-alleles.tsv")
-
-		collectCmd.addFile("clonotypes/" + suffix, clonotypes, { tag: "collectInput" })
-
-		// HILARy's pairwise test is quadratic per class, so it gets every core.
-		// RAM is unmeasured on deep repertoires; the floor is generous on purpose.
-		clustering := exec.builder().
-			software(hilarySw).
-			resources({
-				onCPU: {
-					cpu: 16,
-					// Measured at 3.9x + 1.25 GiB, linear up to 510k rows.
-					ram: f.size("aligned").times(6).plus(f.gib(2)).
-						between(f.gib(3), f.gib(256)).staticFallback(f.gib(8))
-				}
-			}).
-			addFile("clonotypes.tsv", clonotypes, { tag: "aligned" }).
-			addFile("aligned.tsv", alignedTable, { tag: "aligned" }).
-			arg("cluster").
-			arg("--clonotypes").arg("clonotypes.tsv").
-			arg("--aligned").arg("aligned.tsv").
-			arg("--out-clones").arg("clones.tsv").
-			arg("--out-method").arg("method.json").
-			arg("--mode").arg(params.clusteringMode).
-			arg("--threshold").arg(string(params.clusteringThreshold)).
-			arg("--precision").arg(string(params.precision)).
-			arg("--sensitivity").arg(string(params.sensitivity)).
-			arg("--threads").arg("16")
-
-		// HILARy numbers clones from 1 per run, so ids need a donor namespace.
-		if params.hasDonorColumn {
-			clustering.arg("--clone-prefix").arg(donors[i] + "/")
-		}
-
-		clustered := clustering.saveFile("clones.tsv").
-			saveFileContent("method.json").
-			saveStdoutStream().
-			printErrStreamToStdout().run()
-		clusteringLogs.add([groupName(i)], clustered.getStdoutStream())
-		clusteringMethods.add([groupName(i)], clustered.getFileContent("method.json"))
-
-		// FastTree and RAxML run one single-threaded job per worker, so cores scale
-		// linearly; IgPhyML is one heavy process.
-		treeCPUs := runsIgPhyML ? 2 : 16
-		treesCmd := exec.builder().
-			software(immcantationSw).
-			resources({
-				onCPU: {
-					cpu: treeCPUs,
-					// The step holds about 1.5 GiB + 6x aligned and fits its workers, 2.5 GiB each, into
-					// the rest; 24 GiB fits about 7.
-					ram: f.size("aligned").times(8).plus(f.gib(24)).
-						between(f.gib(24), f.gib(256)).staticFallback(f.gib(32))
-				}
-			}).
-			addFile("clonotypes.tsv", clonotypes).
-			addFile("clones.tsv", clustered.getFile("clones.tsv")).
-			addFile("aligned.tsv", alignedTable, { tag: "aligned" }).
-			addFile("annotations.tsv", inputs.anchorsTable).
-			arg("--stage").arg("trees").
-			arg("--annotations").arg("annotations.tsv").
-			arg("--clonotypes").arg("clonotypes.tsv").
-			arg("--clones").arg("clones.tsv").
-			arg("--aligned").arg("aligned.tsv").
-			arg("--igphyml-scope").arg(params.igPhyMLScope).
-			arg("--threads").arg(string(treeCPUs)).
-			arg("--out-log").arg("trees.log").
-			arg("--out-lineages").arg("lineages.tsv").
-			arg("--out-nodes").arg("nodes.tsv").
-			arg("--out-node-links").arg("node-links.tsv").
-			arg("--out-builders").arg("builders.tsv").
-			arg("--out-aa-cdist").arg("aa-cdist.tsv").
-			arg("--out-germline-mutations").arg("germline-mutations.tsv").
-			arg("--out-consensus").arg("consensus.tsv").
-			arg("--out-anchor-distances").arg("anchor-distances.tsv").
-			saveFile("anchor-distances.tsv").
-			saveFile("lineages.tsv").
-			saveFile("nodes.tsv").
-			saveFile("node-links.tsv").
-			saveFile("builders.tsv").
-			saveFile("aa-cdist.tsv").
-			saveFile("germline-mutations.tsv").
-			saveFile("consensus.tsv").
-			saveFile("trees.log").
-			saveStdoutStream().
-			printErrStreamToStdout()
-
-		if params.useLightChains {
-			treesCmd.arg("--light-chains")
+		}))
+		treeParams := {
+			igPhyMLScope: params.igPhyMLScope,
+			useLightChains: params.useLightChains
 		}
 		// Unset means no cap, only the structural floor of two tips.
 		if !is_undefined(params.maxTipsPerTree) {
-			treesCmd.arg("--max-tips").arg(string(params.maxTipsPerTree))
+			treeParams.maxTipsPerTree = params.maxTipsPerTree
 		}
 		if !is_undefined(params.minTipsPerTree) {
-			treesCmd.arg("--min-tips").arg(string(params.minTipsPerTree))
+			treeParams.minTipsPerTree = params.minTipsPerTree
 		}
+		trees := outputsOf("trees", render.create(treesTpl, {
+			clonotypes: prep.clonotypes,
+			clones: cluster.clones,
+			aligned: prep.aligned,
+			anchors: inputs.anchorsTable,
+			params: treeParams
+		}))
 
-		trees := treesCmd.run()
-		treesLogs.add([groupName(i)], trees.getStdoutStream())
+		alignmentsLogs.add([groupName(i)], prep.alignLog)
+		allelesLogs.add([groupName(i)], prep.allelesLog)
+		alleleRoutes.add([groupName(i)], prep.route)
+		clusteringLogs.add([groupName(i)], cluster.log)
+		clusteringMethods.add([groupName(i)], cluster.method)
+		treesLogs.add([groupName(i)], trees.log)
 
-		collectCmd.addFile("logs/donor-" + string(i) + ".log", trees.getFile("trees.log"))
-		collectCmd.addFile("lineages/" + suffix, trees.getFile("lineages.tsv"), { tag: "collectInput" })
-		collectCmd.addFile("nodes/" + suffix, trees.getFile("nodes.tsv"), { tag: "collectInput" })
-		collectCmd.addFile("node-links/" + suffix, trees.getFile("node-links.tsv"), { tag: "collectInput" })
-		collectCmd.addFile("builders/" + suffix, trees.getFile("builders.tsv"), { tag: "collectInput" })
-		collectCmd.addFile("aa-cdist/" + suffix, trees.getFile("aa-cdist.tsv"), { tag: "collectInput" })
-		collectCmd.addFile("germline-mutations/" + suffix, trees.getFile("germline-mutations.tsv"), { tag: "collectInput" })
-		collectCmd.addFile("consensus/" + suffix, trees.getFile("consensus.tsv"), { tag: "collectInput" })
-		collectCmd.addFile("anchor-distances/" + suffix, trees.getFile("anchor-distances.tsv"), { tag: "collectInput" })
+		donorFiles[string(i)] = maps.merge(trees, { clonotypes: prep.clonotypes })
+		resultsToCache[string(i)] = { prep: prep, cluster: cluster, trees: trees }
 	}
 
-	// Must match the read-back loop below: a file read but not saved fails at render time.
+	sampleMetadata := {}
+	collectDatasets := []
 	for ds in params.datasets {
-		idx := ds.index
-		for name in ["lineages", "node-links", "aa-cdist", "germline-mutations", "expansion", "member-counts", "anchor-distances"] {
-			collectCmd.saveFile("per-dataset/" + name + "-" + idx + ".tsv")
+		if ds.hasSampleMetadata {
+			sampleMetadata[ds.index] = inputs.sampleMetadata[ds.index]
 		}
-		for anchorDs in params.datasets {
-			if anchorDs.isAnchor && anchorDs.index != idx {
-				collectCmd.saveFile("per-dataset/anchor-links-" + idx + "-" + anchorDs.index + ".tsv")
-			}
-		}
+		collectDatasets = append(collectDatasets, { index: ds.index, isAnchor: ds.isAnchor })
 	}
-
-	collected := collectCmd.
-		saveFile("nodes.tsv").
-		saveFile("lineage-stats.tsv").
-		saveFile("node-properties.tsv").
-		saveFile("node-metadata.tsv").
-		saveFile("node-abundance.tsv").
-		saveFileContent("donor-stats.json").
-		saveFileContent("run-id.json").
-		saveFileContent("trees.log").
-		saveStdoutStream().
-		printErrStreamToStdout().
-		run()
+	collected := outputsOf("collect", render.create(collectTpl, {
+		abundance: inputs.abundanceTable,
+		annotations: inputs.annotationsTable,
+		sampleMetadata: sampleMetadata,
+		donors: donorFiles,
+		params: { datasets: collectDatasets, donors: donors, donorsTsv: donorsTsv }
+	}))
+	resultsToCache.collect = collected
 
 	outputs := {
 		allelesLogs: allelesLogs.build(),
@@ -453,34 +272,31 @@ self.body(func(inputs) {
 		clusteringLogs: clusteringLogs.build(),
 		treesLogs: treesLogs.build(),
 		// One run for all donors, after the last donor's trees.
-		collectLog: collected.getStdoutStream(),
+		collectLog: collected.log,
 		alleleRoutes: alleleRoutes.build(),
 		clusteringMethods: clusteringMethods.build(),
-		nodes: collected.getFile("nodes.tsv"),
-		lineageStats: collected.getFile("lineage-stats.tsv"),
-		nodeProperties: collected.getFile("node-properties.tsv"),
-		nodeMetadata: collected.getFile("node-metadata.tsv"),
-		nodeAbundance: collected.getFile("node-abundance.tsv"),
-		donorStats: collected.getFileContent("donor-stats.json"),
-		runId: collected.getFileContent("run-id.json"),
+		nodes: collected.nodes,
+		lineageStats: collected.lineageStats,
+		nodeProperties: collected.nodeProperties,
+		nodeMetadata: collected.nodeMetadata,
+		nodeAbundance: collected.nodeAbundance,
+		donorStats: collected.donorStats,
+		runId: collected.runId,
 		// Per-donor counts, plus clonotypes shared between donors or placed nowhere.
 		clusteringLog: split.getStdoutContent(),
-		treesLog: collected.getFileContent("trees.log")
+		treesLog: collected.treesLog,
+		resultsToCache: resultsToCache
 	}
 	for ds in params.datasets {
 		idx := ds.index
-		outputs["lineages-" + idx] = collected.getFile("per-dataset/lineages-" + idx + ".tsv")
-		outputs["nodeLinks-" + idx] = collected.getFile("per-dataset/node-links-" + idx + ".tsv")
-		outputs["aaCdist-" + idx] = collected.getFile("per-dataset/aa-cdist-" + idx + ".tsv")
-		outputs["germlineMutations-" + idx] = collected.getFile("per-dataset/germline-mutations-" + idx + ".tsv")
-		outputs["expansion-" + idx] = collected.getFile("per-dataset/expansion-" + idx + ".tsv")
-		outputs["memberCounts-" + idx] = collected.getFile("per-dataset/member-counts-" + idx + ".tsv")
-		outputs["anchorDistances-" + idx] = collected.getFile("per-dataset/anchor-distances-" + idx + ".tsv")
+		for key in ["lineages", "nodeLinks", "aaCdist", "germlineMutations", "expansion", "memberCounts", "anchorDistances"] {
+			outputs[key + "-" + idx] = collected.perDataset.getFutureInputField(key + "-" + idx)
+		}
 		// Per dataset pair: an anchor id only means something with its issuing dataset.
 		for anchorDs in params.datasets {
 			if anchorDs.isAnchor && anchorDs.index != idx {
-				outputs["anchorLinks-" + idx + "-" + anchorDs.index] =
-					collected.getFile("per-dataset/anchor-links-" + idx + "-" + anchorDs.index + ".tsv")
+				pair := idx + "-" + anchorDs.index
+				outputs["anchorLinks-" + pair] = collected.perDataset.getFutureInputField("anchorLinks-" + pair)
 			}
 		}
 	}

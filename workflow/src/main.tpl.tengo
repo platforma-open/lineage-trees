@@ -1425,6 +1425,8 @@ wf.body(func(args) {
 			clusteringLogs: perDonor.output("clusteringLogs"),
 			treesLogs: perDonor.output("treesLogs"),
 			collectLog: perDonor.output("collectLog"),
+			// Every stage's outputs, kept so the next run recovers the stages instead of rerunning them.
+			resultsToCache: perDonor.output("resultsToCache"),
 			alleleRoutes: perDonor.output("alleleRoutes"),
 			clusteringMethods: perDonor.output("clusteringMethods"),
 			datasets: smart.createJsonResource(datasetRuns),

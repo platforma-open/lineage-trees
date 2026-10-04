@@ -1,0 +1,155 @@
+// Merges every donor's tree output and writes the tables the block imports. Pure, and its
+// outputs are kept by the block, so the imports always find their files.
+
+self := import("@platforma-sdk/workflow-tengo:tpl")
+
+exec := import("@platforma-sdk/workflow-tengo:exec")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+maps := import("@platforma-sdk/workflow-tengo:maps")
+
+hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.hilary:main")
+
+f := exec.formula
+
+// A donor's input to the directory collect reads it from.
+DIRS := {
+	clonotypes: "clonotypes",
+	lineages: "lineages",
+	nodes: "nodes",
+	nodeLinks: "node-links",
+	builders: "builders",
+	aaCdist: "aa-cdist",
+	germlineMutations: "germline-mutations",
+	consensus: "consensus",
+	anchorDistances: "anchor-distances"
+}
+
+// Per-dataset tables, by output key prefix and file name prefix.
+PER_DATASET := {
+	"lineages": "lineages",
+	"nodeLinks": "node-links",
+	"aaCdist": "aa-cdist",
+	"germlineMutations": "germline-mutations",
+	"expansion": "expansion",
+	"memberCounts": "member-counts",
+	"anchorDistances": "anchor-distances"
+}
+
+self.defineOutputs("nodes", "lineageStats", "nodeProperties", "nodeMetadata", "nodeAbundance",
+	"donorStats", "runId", "treesLog", "log", "perDataset")
+
+self.body(func(inputs) {
+	params := inputs.params
+
+	collectCmd := exec.builder().
+		software(hilarySw).
+		// Every donor's tree output at once. Measured at 3 sizes only.
+		resources({
+			onCPU: {
+				cpu: 1,
+				ram: f.size("collectInput").times(6).plus(f.gib(1)).
+					between(f.gib(2), f.gib(256)).staticFallback(f.gib(6))
+			}
+		}).
+		addFile("abundance.tsv", inputs.abundance, { tag: "collectInput" }).
+		addFile("annotations.tsv", inputs.annotations, { tag: "collectInput" }).
+		arg("collect").
+		arg("--annotations").arg("annotations.tsv").
+		arg("--clonotypes-dir").arg("clonotypes").
+		arg("--out-node-properties").arg("node-properties.tsv").
+		arg("--out-node-metadata").arg("node-metadata.tsv").
+		arg("--out-node-abundance").arg("node-abundance.tsv").
+		arg("--lineages-dir").arg("lineages").
+		arg("--nodes-dir").arg("nodes").
+		arg("--node-links-dir").arg("node-links").
+		arg("--builders-dir").arg("builders").
+		arg("--aa-cdist-dir").arg("aa-cdist").
+		arg("--germline-mutations-dir").arg("germline-mutations").
+		arg("--consensus-dir").arg("consensus").
+		arg("--anchor-distances-dir").arg("anchor-distances").
+		arg("--abundance").arg("abundance.tsv").
+		arg("--out-nodes").arg("nodes.tsv").
+		arg("--out-lineage-stats").arg("lineage-stats.tsv").
+		arg("--out-donor-stats").arg("donor-stats.json").
+		arg("--out-run-id").arg("run-id.json").
+		arg("--per-dataset-dir").arg("per-dataset").
+		arg("--logs-dir").arg("logs").
+		arg("--out-log").arg("trees.log")
+	for ds in params.datasets {
+		collectCmd.arg("--dataset").arg(ds.index)
+		// So link files exist for every picked pair, even ones the data leaves empty.
+		if ds.isAnchor {
+			collectCmd.arg("--anchor").arg(ds.index)
+		}
+	}
+	maps.forEach(inputs.sampleMetadata, func(index, file) {
+		collectCmd.addFile("sample-metadata-" + index + ".tsv", file).
+			arg("--sample-metadata").arg(index).arg("sample-metadata-" + index + ".tsv")
+	})
+
+	if len(params.donors) > 0 {
+		collectCmd.writeFile("donors.tsv", params.donorsTsv)
+		collectCmd.arg("--donors").arg("donors.tsv")
+		for donor in params.donors {
+			collectCmd.arg("--donor").arg(donor)
+		}
+	}
+
+	// Donors by position, as `split` numbered them.
+	maps.forEach(inputs.donors, func(i, files) {
+		suffix := "donor-" + i + ".tsv"
+		maps.forEach(DIRS, func(name, dir) {
+			collectCmd.addFile(dir + "/" + suffix, files[name], { tag: "collectInput" })
+		})
+		collectCmd.addFile("logs/donor-" + i + ".log", files.treesLog)
+	})
+
+	// Must match the read-back loop below: a file read but not saved fails at render time.
+	perDatasetFiles := {}
+	for ds in params.datasets {
+		idx := ds.index
+		maps.forEach(PER_DATASET, func(key, name) {
+			perDatasetFiles[key + "-" + idx] = "per-dataset/" + name + "-" + idx + ".tsv"
+		})
+		for anchorDs in params.datasets {
+			if anchorDs.isAnchor && anchorDs.index != idx {
+				pair := idx + "-" + anchorDs.index
+				perDatasetFiles["anchorLinks-" + pair] = "per-dataset/anchor-links-" + pair + ".tsv"
+			}
+		}
+	}
+	maps.forEach(perDatasetFiles, func(key, file) {
+		collectCmd.saveFile(file)
+	})
+
+	collected := collectCmd.
+		saveFile("nodes.tsv").
+		saveFile("lineage-stats.tsv").
+		saveFile("node-properties.tsv").
+		saveFile("node-metadata.tsv").
+		saveFile("node-abundance.tsv").
+		saveFileContent("donor-stats.json").
+		saveFileContent("run-id.json").
+		saveFileContent("trees.log").
+		saveStdoutStream().
+		printErrStreamToStdout().
+		run()
+
+	perDataset := {}
+	maps.forEach(perDatasetFiles, func(key, file) {
+		perDataset[key] = collected.getFile(file)
+	})
+
+	return {
+		nodes: collected.getFile("nodes.tsv"),
+		lineageStats: collected.getFile("lineage-stats.tsv"),
+		nodeProperties: collected.getFile("node-properties.tsv"),
+		nodeMetadata: collected.getFile("node-metadata.tsv"),
+		nodeAbundance: collected.getFile("node-abundance.tsv"),
+		donorStats: collected.getFileContent("donor-stats.json"),
+		runId: collected.getFileContent("run-id.json"),
+		treesLog: collected.getFileContent("trees.log"),
+		log: collected.getStdoutStream(),
+		perDataset: perDataset
+	}
+})
