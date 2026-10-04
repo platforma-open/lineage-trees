@@ -14,6 +14,7 @@ import { useApp } from "./app";
 import { indexOfCurrent, keyedStatus } from "./keyedStatus";
 import { selectedNodes } from "./baskets";
 import { useAddToBasket } from "./useAddToBasket";
+import { useLeaveWhenGone } from "./staleViews";
 
 // One page per opened path, picked from `pathViews` by query id. Read only: the path was
 // resolved on click.
@@ -23,6 +24,7 @@ const index = computed(() =>
   indexOfCurrent(app.model.data.pathViews, app.queryParams.id, app.model.outputs.runKey),
 );
 const view = computed(() => (index.value < 0 ? undefined : app.model.data.pathViews[index.value]));
+useLeaveWhenGone(index);
 
 // Keeps the output's status so the table shows loading and errors instead of going blank.
 const tableStatus = computed(() => keyedStatus(app.model.outputs.mutationalPaths, view.value?.id));
@@ -81,7 +83,7 @@ const close = async () => {
     </template>
 
     <PlAlert v-if="basket.error.value" type="error">{{ basket.error.value }}</PlAlert>
-    <div v-if="!view">This path is no longer open. Open a tree and choose a node to trace.</div>
+    <div v-if="!view">The path is loading.</div>
     <template v-else>
       <PlAgDataTableV2
         v-if="table"

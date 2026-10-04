@@ -17,6 +17,7 @@ import { resolvePath } from "./resolvePath";
 import { useApp } from "./app";
 import { indexOfCurrent, keyedStatus } from "./keyedStatus";
 import { useAddToBasket } from "./useAddToBasket";
+import { useLeaveWhenGone } from "./staleViews";
 
 const app = useApp<`/tree?id=${string}` | `/path?id=${string}` | "/trees">();
 
@@ -24,6 +25,7 @@ const index = computed(() =>
   indexOfCurrent(app.model.data.treeViews, app.queryParams.id, app.model.outputs.runKey),
 );
 const missing = computed(() => index.value < 0);
+useLeaveWhenGone(index);
 const view = computed({
   get: () => app.model.data.treeViews[index.value],
   set: (v) => (app.model.data.treeViews[index.value] = v),
@@ -259,7 +261,7 @@ const fixedOptions = computed(() => {
       <PlBtnGhost icon="graph" @click.stop="tab = 'graph'">Go to Graph</PlBtnGhost>
       <PlBtnGhost icon="close" @click.stop="close">Close</PlBtnGhost>
     </template>
-    <div v-if="missing">This tree is no longer open.</div>
+    <div v-if="missing">The tree is loading.</div>
     <PlAlert v-if="basket.error.value" type="error">{{ basket.error.value }}</PlAlert>
     <PlAlert v-if="pathError" type="error">{{ pathError }}</PlAlert>
     <template v-if="view">
