@@ -830,6 +830,10 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       // For turning a node into a path: each node's parent, and its label.
       topologyId: topology.id,
       labelId: label?.id,
+      // Set on the member nodes of a lineage without a tree: the page shows them as a table.
+      noTreeReasonId: nodeScoped.find(
+        (column) => column.spec.name === "pl7.app/dendrogram/noTreeReason",
+      )?.id,
       lineageAxis: getAxisId(topology.spec.axesSpec[0]),
       nodeAxis: getAxisId(topology.spec.axesSpec[1]),
       // The tree page colours tips by anchor when set.

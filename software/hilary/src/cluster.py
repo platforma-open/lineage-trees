@@ -14,7 +14,7 @@ Stages, in workflow order:
            clonotype has no alignment. --out-method records which ran.
   collect  per-donor tree outputs + abundance -> merged tables:
              --out-nodes            every donor's nodes
-             --out-lineage-stats    lineage_id, cluster_size, tip_count, tree_builder,
+             --out-lineage-stats    lineage_id, cluster_size, tip_count, tree_builder, no_tree_reason,
                                     genes, CDR3, abundance, sample count, donor, source
              --out-node-properties  lineage_id, node_id, clonotype content for the tooltip
              --out-node-metadata    lineage_id, node_id, one column per metadata
@@ -468,6 +468,43 @@ def _read_donor_file(directory: Path, index: int, columns: list[str]) -> pd.Data
     return frame if not frame.empty else pd.DataFrame(columns=columns)
 
 
+def _add_member_nodes(lineages: pd.DataFrame, nodes: pd.DataFrame, links: pd.DataFrame,
+                      builders: pd.DataFrame, clonotypes: pd.DataFrame
+                      ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Give each lineage without a tree one parentless node per distinct sequence, carrying
+    why it has no tree, so its members can still be listed. Tree nodes get a blank reason."""
+    nodes = nodes.assign(no_tree_reason="")
+    members = lineages[~lineages["lineage_id"].isin(set(nodes["lineage_id"]))]
+    if members.empty:
+        return nodes, links
+    if "group_id" not in members.columns:
+        members = members.assign(group_id=members["sequence_id"])
+    anchors = (set(clonotypes.loc[clonotypes["is_anchor"] == "true", "sequence_id"])
+               if "is_anchor" in clonotypes.columns else set())
+    # As the tree step picks a tip's clonotype: an anchor first, then the lowest id.
+    members = (members[["lineage_id", "group_id", "sequence_id"]]
+               .drop_duplicates(["lineage_id", "sequence_id"])
+               .assign(_other=lambda d: ~d["sequence_id"].isin(anchors))
+               .sort_values(["lineage_id", "group_id", "_other", "sequence_id"]))
+    members["is_representative"] = ~members.duplicated(["lineage_id", "group_id"])
+    heads = members[members["is_representative"]].copy()
+    heads["node_id"] = (heads.groupby("lineage_id").cumcount() + 1).astype(str)
+    reason = (builders.set_index("lineage_id")["no_tree_reason"] if not builders.empty
+              else pd.Series(dtype=str))
+    added = pd.DataFrame({column: "" for column in NODE_COLUMNS}, index=heads.index)
+    added["lineage_id"] = heads["lineage_id"]
+    added["node_id"] = heads["node_id"]
+    added["is_observed"] = "true"
+    added["label"] = heads["sequence_id"]
+    added["no_tree_reason"] = (heads["lineage_id"].map(reason).replace("", pd.NA)
+                               .fillna("No tree was built; the trees log has the details."))
+    linked = members.merge(heads[["lineage_id", "group_id", "node_id"]], on=["lineage_id", "group_id"])
+    linked = linked.assign(link="1", is_representative=linked["is_representative"].map(
+        {True: "true", False: "false"}))[NODE_LINK_FILE_COLUMNS]
+    return (pd.concat([nodes, added], ignore_index=True),
+            pd.concat([links, linked], ignore_index=True))
+
+
 def _concat(frames: list[pd.DataFrame], columns: list[str]) -> pd.DataFrame:
     frames = [f for f in frames if not f.empty]
     if not frames:
@@ -490,7 +527,7 @@ NODE_COLUMNS = ["lineage_id", "node_id", "parent_id", "distance", "is_observed",
 NODE_LINK_COLUMNS = ["lineage_id", "node_id", "sequence_id", "link"]
 # As the tree step writes it; is_representative is read here, not exported.
 NODE_LINK_FILE_COLUMNS = [*NODE_LINK_COLUMNS, "is_representative"]
-BUILDER_COLUMNS = ["lineage_id", "tree_builder"]
+BUILDER_COLUMNS = ["lineage_id", "tree_builder", "no_tree_reason"]
 AA_CDIST_COLUMNS = ["sequence_id", "lineage_id", "aa_cdist"]
 CONSENSUS_COLUMNS = ["lineage_id", "consensus_sequence_count"]
 AA_CDIST_OUT_COLUMNS = ["sequence_id", "aa_cdist"]
@@ -868,6 +905,8 @@ def collect(args: argparse.Namespace) -> None:
     # Tip labels are prefixed clonotype ids; strip the prefix.
     links = _concat(link_parts, NODE_LINK_FILE_COLUMNS)
     clonotypes = _read_clonotypes(args, donors)
+    builders = _concat(builder_parts, BUILDER_COLUMNS)
+    nodes, links = _add_member_nodes(lineages, nodes, links, builders, clonotypes)
     step("Labelling nodes")
     if not nodes.empty:
         observed_label = nodes["label"].astype(str).str.contains(DATASET_SEP, regex=False)
@@ -888,19 +927,19 @@ def collect(args: argparse.Namespace) -> None:
         .nunique()
         .rename(columns={"group_id": "cluster_size"})
     )
-    observed = nodes[nodes["is_observed"] == "true"] if not nodes.empty else nodes
+    # Tree tips only: the member nodes of lineages without a tree carry a reason.
+    observed = (nodes[(nodes["is_observed"] == "true") & (nodes["no_tree_reason"] == "")]
+                if not nodes.empty else nodes)
     tips = observed.groupby("lineage_id").size() if not observed.empty else pd.Series(dtype=int)
     lineage_stats["tip_count"] = (
         lineage_stats["lineage_id"].map(tips).fillna(0).astype(int)
     )
 
     # The builder sets the branch length unit: steps or substitutions per site.
-    builders = _concat(builder_parts, BUILDER_COLUMNS)
-    lineage_stats["tree_builder"] = (
-        lineage_stats["lineage_id"].map(
-            builders.set_index("lineage_id")["tree_builder"] if not builders.empty
-            else pd.Series(dtype=str))
-    )
+    by_lineage = builders.set_index("lineage_id") if not builders.empty else None
+    for column in ("tree_builder", "no_tree_reason"):
+        lineage_stats[column] = lineage_stats["lineage_id"].map(
+            by_lineage[column] if by_lineage is not None else pd.Series(dtype=str))
 
     # Consensus size, which explains a blank aa-cdist.
     support = _concat(support_parts, CONSENSUS_COLUMNS)

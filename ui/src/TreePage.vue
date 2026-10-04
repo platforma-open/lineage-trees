@@ -18,6 +18,7 @@ import { useApp } from "./app";
 import { indexOfCurrent, keyedStatus } from "./keyedStatus";
 import { useAddToBasket } from "./useAddToBasket";
 import { useLeaveWhenGone } from "./staleViews";
+import { readLineageColumns } from "./lineageColumns";
 
 const app = useApp<`/tree?id=${string}` | `/path?id=${string}` | "/trees">();
 
@@ -204,6 +205,36 @@ const tab = computed({
   },
 });
 
+// Why this lineage has no tree, read from its member nodes; undefined for a lineage with one.
+// Local: it is read off the result, never stored.
+const noTreeReason = ref<string | undefined>();
+watch(
+  () =>
+    [
+      view.value?.lineageId,
+      app.model.outputs.treeNodeColumns,
+      app.model.outputs.treeNodesPf,
+    ] as const,
+  async ([lineageId, columns, frameStatus]) => {
+    const frame = frameStatus?.ok === true ? frameStatus.value : undefined;
+    if (!lineageId || !columns?.noTreeReasonId || !frame) {
+      noTreeReason.value = undefined;
+      return;
+    }
+    try {
+      const read = await readLineageColumns(frame, columns, lineageId, [columns.noTreeReasonId]);
+      // The page may have moved to another tree while this was read.
+      if (view.value?.lineageId !== lineageId) return;
+      noTreeReason.value = [...(read.get(columns.noTreeReasonId)?.values() ?? [])][0];
+    } catch {
+      noTreeReason.value = undefined;
+    }
+  },
+  { immediate: true },
+);
+// Without a tree there is nothing to draw, so the members are listed instead.
+const showTable = computed(() => tab.value === "table" || noTreeReason.value !== undefined);
+
 const tableState = computed({
   get: () => view.value?.tableState ?? createPlDataTableStateV2(),
   set: (value) => {
@@ -252,21 +283,26 @@ const fixedOptions = computed(() => {
 <template>
   <!-- The page header needs a title and GraphMaker draws its own, so the graph puts its
   buttons in its title line and the table in the page's. -->
-  <PlBlockPage :no-body-gutters="tab === 'graph'">
-    <template v-if="view && tab === 'table'" #title>{{ view.state.title }}</template>
-    <template v-if="view && tab === 'table'" #append>
+  <PlBlockPage :no-body-gutters="!showTable">
+    <template v-if="view && showTable" #title>{{ view.state.title }}</template>
+    <template v-if="view && showTable" #append>
       <PlBtnGhost v-if="selected.length > 0" icon="add" @click.stop="addSelected">
         Add to basket
       </PlBtnGhost>
-      <PlBtnGhost icon="graph" @click.stop="tab = 'graph'">Go to Graph</PlBtnGhost>
+      <PlBtnGhost v-if="noTreeReason === undefined" icon="graph" @click.stop="tab = 'graph'">
+        Go to Graph
+      </PlBtnGhost>
       <PlBtnGhost icon="close" @click.stop="close">Close</PlBtnGhost>
     </template>
     <div v-if="missing">The tree is loading.</div>
     <PlAlert v-if="basket.error.value" type="error">{{ basket.error.value }}</PlAlert>
     <PlAlert v-if="pathError" type="error">{{ pathError }}</PlAlert>
+    <PlAlert v-if="noTreeReason" type="info">
+      No tree for this lineage: {{ noTreeReason }} Its members are listed below.
+    </PlAlert>
     <template v-if="view">
       <GraphMaker
-        v-if="tab === 'graph'"
+        v-if="!showTable"
         v-model="view.state"
         chart-type="dendro"
         :p-frame="app.model.outputs.treeNodesPf"

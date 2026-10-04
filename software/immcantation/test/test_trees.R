@@ -96,6 +96,14 @@ run_trees <- function(scenario) {
 }
 tail_of <- function(r) cat(substr(r$log, max(1, nchar(r$log) - 1500), nchar(r$log)), "\n")
 # One check over named parts; a failure lists the parts that failed.
+# Every lineage is in builders.tsv; one without a tree says why, one with a tree does not.
+reasons_complete <- function(p) {
+  ids <- unique(p$lineages$lineage_id)
+  reason <- p$builders$no_tree_reason[match(ids, p$builders$lineage_id)]
+  treed <- ids %in% p$nodes$lineage_id
+  !anyNA(reason) && all(nzchar(reason[!treed])) && !any(nzchar(reason[treed]))
+}
+
 ok_all <- function(what, parts) {
   bad <- names(parts)[!vapply(parts, isTRUE, logical(1))]
   ok(if (length(bad)) sprintf("%s [failed: %s]", what, paste(bad, collapse = "; ")) else what,
@@ -343,6 +351,8 @@ if (p$ok) {
   ok_all("paired: lineages with no light chain still get trees", list(
     "dark built" = length(dark_lineages) == 2 && all(dark_lineages %in% built),
     "paired built" = length(setdiff(built, dark_lineages)) > 0))
+  ok("paired: lineages without a tree say why, and some here have none",
+     reasons_complete(p) && !all(p$lineages$lineage_id %in% p$nodes$lineage_id))
   # Two tips plus germline is one short of RAxML-NG's minimum.
   builder_of <- setNames(p$builders$tree_builder, p$builders$lineage_id)
   tips <- table(p$lineages$lineage_id)
@@ -535,7 +545,8 @@ cat("== tiny: IgPhyML, two tips per lineage ==\n")
 g <- run_trees("tiny")
 first <- "tiny: IgPhyML builds the trees and is recorded as the builder"
 if (g$ok) {
-  ok(first, nrow(g$nodes) > 0 && nrow(g$builders) > 0 && all(g$builders$tree_builder == "igphyml"))
+  built_by <- g$builders$tree_builder[nzchar(g$builders$tree_builder)]
+  ok(first, nrow(g$nodes) > 0 && length(built_by) > 0 && all(built_by == "igphyml"))
   ok("tiny: IgPhyML gets one omega per chain", grepl("partition: hl", g$log))
   check_topology(g$nodes, "tiny")
   check_node_sequences(g$nodes, "tiny", light = TRUE, run = g)
@@ -559,7 +570,9 @@ if (ba$ok) {
   clones <- read_tsv(file.path(root, "bare", "clones.tsv"))
   ok_all(first, list(
     "lineages kept, no tree" = setequal(ba$lineages$sequence_id, clones$sequence_id) && nrow(ba$nodes) == 0,
-    "reason" = grepl("no clonotype carries a heavy chain alignment: no trees for this group", ba$log)))
+    "reason" = grepl("no clonotype carries a heavy chain alignment: no trees for this group", ba$log),
+    "each lineage says why" = reasons_complete(ba) &&
+      all(ba$builders$no_tree_reason == "No clonotype carries a heavy chain alignment.")))
 } else crashed(ba, first)
 
 cat(sprintf("\n%d checks, %d failures\n", checks, failures))

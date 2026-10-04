@@ -662,6 +662,25 @@ wf.body(func(args) {
 		})
 	}
 
+	// Blank where a tree was built. On nodes too: a lineage without a tree lists its members
+	// as parentless nodes, and the tree page reads the reason from them.
+	noTreeReasonColumn := func(priority, visibility) {
+		return {
+			column: "no_tree_reason",
+			allowNA: true,
+			spec: {
+				name: "pl7.app/dendrogram/noTreeReason",
+				valueType: "String",
+				annotations: {
+					"pl7.app/label": "Why no tree",
+					"pl7.app/description": "Why no tree was built for this lineage. Blank where one was.",
+					"pl7.app/table/visibility": visibility,
+					"pl7.app/table/orderPriority": priority
+				}
+			}
+		}
+	}
+
 	lineageStats := traced(blockTrace, xsv.importFile(perDonor.output("lineageStats"), "tsv", {
 		axes: [{ column: "lineage_id", spec: lineageAxisSpec }],
 		columns: lineageStatsColumns + [{
@@ -716,7 +735,7 @@ wf.body(func(args) {
 					"pl7.app/table/orderPriority": "87000"
 				}
 			}
-		}]
+		}, noTreeReasonColumn("86900", "default")]
 	}, { splitDataAndSpec: true }))
 
 	// FastTree and RAxML count per nucleotide site, and so does parsimony: dowser divides its
@@ -865,6 +884,8 @@ wf.body(func(args) {
 			}
 		}, {
 			column: "node_depth",
+			// Blank on the member nodes of a lineage without a tree.
+			allowNA: true,
 			spec: {
 				name: "pl7.app/dendrogram/nodeDepth",
 				valueType: "Int",
@@ -899,7 +920,7 @@ wf.body(func(args) {
 					"pl7.app/min": "0"
 				}
 			}
-		}] + stepColumns + sequenceColumns
+		}] + stepColumns + sequenceColumns + [noTreeReasonColumn("96000", "hidden")]
 	}, { splitDataAndSpec: true }))
 
 	// Clonotype properties on tree axes (the dendrogram cannot follow a linker); the tooltip

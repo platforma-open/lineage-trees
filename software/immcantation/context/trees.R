@@ -160,6 +160,26 @@ GERMLINE_MUTATION_COLUMNS <- c("sequence_id", "lineage_id", "germline_mutation_c
 ANCHOR_COLUMNS <- c("sequence_id", "anchor_id", "anchor_aa_heavy", "anchor_nt_heavy",
                     "anchor_aa_light", "anchor_nt_light")
 
+# Why each lineage got no tree, by lineage id. The first reason recorded stands.
+no_tree <- character(0)
+mark_no_tree <- function(ids, reason) {
+  ids <- setdiff(unique(as.character(ids)), names(no_tree))
+  if (length(ids)) no_tree[ids] <<- reason
+}
+as_sentence <- function(s) paste0(toupper(substr(s, 1L, 1L)), substring(s, 2L), ".")
+
+# Every lineage's builder, or why it has none.
+write_builders <- function(lineage_ids, built = data.frame(lineage_id = character(0), tree_builder = character(0))) {
+  if (is.null(builders_path)) return(invisible())
+  ids <- unique(c(built$lineage_id, as.character(lineage_ids)))
+  builder <- built$tree_builder[match(ids, built$lineage_id)]
+  reason <- ifelse(is.na(builder), unname(no_tree[ids]), NA_character_)
+  reason[is.na(builder) & is.na(reason)] <- "No tree was built; the trees log has the details."
+  write.table(data.frame(lineage_id = ids, tree_builder = builder, no_tree_reason = reason,
+                         stringsAsFactors = FALSE),
+              builders_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
+}
+
 finish_empty <- function(reason, membership = NULL) {
   if (stage == "align") {
     # No alignments is a normal state; the trees stage reports it.
@@ -179,6 +199,8 @@ finish_empty <- function(reason, membership = NULL) {
                              link = 1L, stringsAsFactors = FALSE)
   }
   write.table(membership, lineages_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
+  mark_no_tree(membership$lineage_id, as_sentence(reason))
+  write_builders(membership$lineage_id)
   empty <- function(cols) {
     d <- as.data.frame(setNames(replicate(length(cols), character(0), simplify = FALSE), cols))
     d
@@ -186,10 +208,6 @@ finish_empty <- function(reason, membership = NULL) {
   write.table(empty(NODE_COLUMNS), nodes_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
   write.table(empty(c("lineage_id", "node_id", "sequence_id", "is_representative", "link")),
               links_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
-  if (!is.null(builders_path)) {
-    write.table(empty(c("lineage_id", "tree_builder")),
-                builders_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
-  }
   # aa-cdist needs no tree, so it may already be written by the time we exit here.
   write_absent <- function(path, cols) {
     if (!is.null(path) && !file.exists(path)) {
@@ -635,6 +653,8 @@ membership$group_id[is.na(membership$group_id)] <- membership$sequence_id[is.na(
 # A linker p-column needs a value alongside its two key columns.
 membership$link <- 1L
 write.table(membership, lineages_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
+mark_no_tree(setdiff(membership$lineage_id, resolved$lineage_id),
+             "No member has an alignment to build a tree from.")
 
 # Heavy nt differences from the germline, V and J only, where both sides carry a base.
 if (!is.null(germline_mutations_path)) {
@@ -879,7 +899,11 @@ for (k in seq_along(lineages)) {
   lid <- names(lineages)[k]
   rows <- lineages[[k]]
   # Needs two distinct sequences; one sequence is one tip and no tree.
-  if (length(unique(r_group[rows][r_heavy[rows]])) < 2) { skip_flag[k] <- TRUE; next }
+  if (length(unique(r_group[rows][r_heavy[rows]])) < 2) {
+    mark_no_tree(lid, "Only one distinct sequence; a tree needs at least two.")
+    skip_flag[k] <- TRUE
+    next
+  }
   lin <- resolved[rows, ]
   parts <- list()
   ok <- TRUE
@@ -900,6 +924,7 @@ for (k in seq_along(lineages)) {
     if (length(unique(nchar(d$germline_alignment))) != 1 ||
         length(unique(nchar(d$sequence_alignment))) != 1) {
       cat(sprintf("lineage %s skipped: %s alignment lengths differ\n", lid, loc))
+      mark_no_tree(lid, "Its members' alignments differ in length, so they cannot be lined up.")
       ok <- FALSE
       break
     }
@@ -1278,7 +1303,7 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
 
 # A build step to its result: collapsed tree rows and builder.
 finish_lineage <- function(step, u) {
-  out <- c(list(slot = u$slot, label = if (is.null(step$label)) u$label else step$label,
+  out <- c(list(slot = u$slot, lid = u$lid, label = if (is.null(step$label)) u$label else step$label,
                 note = step$note), step$meta)
   if (is.null(step$tree)) return(out)
   p <- step$tree$trees[[1]]
@@ -1393,7 +1418,7 @@ run_pool <- function(cl, units) {
     if (sent < n) send(r$node)
     value <- r$value
     if (inherits(value, "try-error")) {
-      value <- list(slot = units[[r$tag]]$slot, label = units[[r$tag]]$label,
+      value <- list(slot = units[[r$tag]]$slot, lid = units[[r$tag]]$lid, label = units[[r$tag]]$label,
                     note = sprintf("produced no tree (%s)", trimws(as.character(value))))
       # A lineage routed in the worker has no label yet, so its note would be lost.
       if (is.null(value$label)) cat(sprintf("%s: %s\n", units[[r$tag]]$lid, value$note))
@@ -1471,6 +1496,7 @@ trees_started <- Sys.time()
 progress("Trees: 0.0%")
 
 formatted <- list(lineages = 0L, seqs = 0L, mixed = 0L, below_min = 0L)
+below_min_reason <- sprintf("Fewer than %d distinct sequences, the minimum tips setting.", min_tips)
 queued <- list()
 ig_keys <- lineage_keys[builder_of == "igphyml"]
 if (length(ig_keys)) {
@@ -1482,6 +1508,7 @@ if (length(ig_keys)) {
     formatted$seqs <- sum(ig_fmt$seqs)
     if (min_tips > 2) {
       formatted$below_min <- sum(ig_fmt$seqs < min_tips)
+      mark_no_tree(real_lineage[as.character(ig_fmt$clone_id[ig_fmt$seqs < min_tips])], below_min_reason)
       ig_fmt <- ig_fmt[ig_fmt$seqs >= min_tips, ]
     }
     ig_mixed <- if (chain == "HL") vapply(ig_fmt$data, function(x) any(x@locus != HEAVY), logical(1)) else rep(FALSE, nrow(ig_fmt))
@@ -1510,6 +1537,15 @@ if (length(units)) {
   finished <- c(finished, run_pool(cl, units))
   parallel::stopCluster(cl)
   rm(units)
+}
+
+# Why each lineage that came back without a tree has none.
+for (r in finished) {
+  if (!is.null(r$nodes) || is.null(r$lid)) next
+  mark_no_tree(r$lid, if (isTRUE(r$below_min)) below_min_reason
+               else if (identical(r$formatted, FALSE)) "Dropped while preparing its sequences for tree building, for example because every one has a stop codon."
+               else if (!is.null(r$note)) as_sentence(sub("^produced no tree \\((.*)\\)$", "tree building failed: \\1", r$note))
+               else "No tree was built; the trees log has the details.")
 }
 
 # Merging and writing the results can take a while on large donors.
@@ -1579,14 +1615,9 @@ if (!is.null(anchor_path)) {
               nrow(distances), length(anchor_rows)))
 }
 
-if (!is.null(builders_path)) {
-  write.table(
-    data.frame(
-      lineage_id = unname(real_lineage[as.character(trees$clone_id)]),
-      tree_builder = trees$tree_builder,
-      stringsAsFactors = FALSE),
-    builders_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
-}
+write_builders(membership$lineage_id,
+               data.frame(lineage_id = unname(real_lineage[as.character(trees$clone_id)]),
+                          tree_builder = trees$tree_builder, stringsAsFactors = FALSE))
 
 progress("Linking tips to clonotypes")
 # Link each tip to every clonotype in its group; the representative is marked.

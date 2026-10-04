@@ -223,6 +223,44 @@ def main(tmp: Path) -> None:
        json.loads((empty / "donor-stats.json").read_text())
        == [{"donor": "A", "clonotype_count": 0, "lineage_count": 0}])
 
+    # A lineage without a tree still lists its members: one parentless node per distinct
+    # sequence, carrying the tree step's reason. Tip counts stay those of real trees.
+    member = tmp / "member-collect"
+    for d in ("lineages", "nodes", "node-links", "builders", "out"):
+        (member / d).mkdir(parents=True)
+    write(member / "lineages" / "donor-0.tsv", [
+        {"sequence_id": "0_a", "lineage_id": "L1", "link": 1, "group_id": "g1"},
+        {"sequence_id": "0_b", "lineage_id": "L1", "link": 1, "group_id": "g1"},
+        {"sequence_id": "0_c", "lineage_id": "L1", "link": 1, "group_id": "g2"},
+        {"sequence_id": "0_d", "lineage_id": "L2", "link": 1, "group_id": "g3"}])
+    node_row = {c: "" for c in ["lineage_id", "node_id", "parent_id", "distance", "is_observed",
+                                "label", "heavy_sequence", "light_sequence", "node_depth",
+                                "terminal_branch_fraction", "parent_descendant_count"]}
+    write(member / "nodes" / "donor-0.tsv", [{**node_row, "lineage_id": "L2", "node_id": "1",
+                                              "is_observed": "true", "label": "0_d", "node_depth": "1"}])
+    write(member / "node-links" / "donor-0.tsv", [{"lineage_id": "L2", "node_id": "1",
+                                                   "sequence_id": "0_d", "link": 1, "is_representative": "true"}])
+    why = "Its members' alignments differ in length, so they cannot be lined up."
+    write(member / "builders" / "donor-0.tsv", [
+        {"lineage_id": "L1", "tree_builder": "", "no_tree_reason": why},
+        {"lineage_id": "L2", "tree_builder": "pratchet", "no_tree_reason": ""}])
+    stage("collect", "--lineages-dir", member / "lineages", "--nodes-dir", member / "nodes",
+          "--node-links-dir", member / "node-links", "--builders-dir", member / "builders",
+          "--clonotypes", write(member / "clonotypes.tsv", [{"sequence_id": s} for s in ("0_a", "0_b", "0_c", "0_d")]),
+          "--dataset", "0", "--per-dataset-dir", member / "out",
+          "--out-nodes", member / "nodes.tsv", "--out-lineage-stats", member / "stats.tsv")
+    member_nodes = read(member / "nodes.tsv")
+    l1 = member_nodes[member_nodes["lineage_id"] == "L1"]
+    member_stats = read(member / "stats.tsv").set_index("lineage_id")
+    member_links = read(member / "out" / "node-links-0.tsv")
+    ok("a lineage without a tree gets one parentless node per distinct sequence, with the reason",
+       len(l1) == 2 and (l1["parent_id"] == "").all() and (l1["no_tree_reason"] == why).all())
+    ok("its members link to their sequence's node",
+       member_links[member_links["lineage_id"] == "L1"].groupby("node_id")["sequence_id"].nunique().sort_values().tolist() == [1, 2])
+    ok("the lineage table carries the reason, and only real trees count tips",
+       member_stats.loc["L1", "no_tree_reason"] == why and member_stats.loc["L1", "tip_count"] == "0"
+       and member_stats.loc["L2", "tip_count"] == "1" and member_stats.loc["L2", "no_tree_reason"] == "")
+
     # The full method compares rows base by base, so padding must not read as a difference:
     # a member with shorter 5' and 3' coverage pads with its gene's germline, not N.
     v_side, j_side = "ACGTACGTACGTAAAACCCCGGGG", "TTTGGGCCC"
