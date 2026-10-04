@@ -264,6 +264,10 @@ def merge(args: argparse.Namespace) -> None:
     annotation_columns = ["sequence_id", "data_source", "is_anchor"]
     if args.out_annotations is not None:
         merged[annotation_columns].to_csv(args.out_annotations, sep="\t", index=False)
+        # The tree step reads anchors only, so renaming a dataset leaves its input unchanged.
+        if args.out_anchors is not None:
+            merged.loc[merged["is_anchor"] == "true", ["sequence_id", "is_anchor"]].to_csv(
+                args.out_anchors, sep="\t", index=False)
         merged = merged.drop(columns=["data_source", "is_anchor"])
     merged.to_csv(args.out_clonotypes, sep="\t", index=False)
     pd.concat(abundance_parts, ignore_index=True).fillna("").to_csv(
@@ -1024,6 +1028,8 @@ def main() -> None:
     m.add_argument("--out-abundance", required=True, type=Path)
     m.add_argument("--out-annotations", type=Path,
                    help="dataset name and anchor flag per clonotype, kept out of --out-clonotypes")
+    m.add_argument("--out-anchors", type=Path,
+                   help="sequence_id and is_anchor of the anchor clonotypes only, for the tree step")
     m.set_defaults(func=merge)
 
     sp = stages.add_parser("split", help="one clonotype table per donor")

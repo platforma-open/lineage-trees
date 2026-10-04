@@ -96,7 +96,7 @@ def main(tmp: Path) -> None:
     merged, abundance = tmp / "merged.tsv", tmp / "abundance.tsv"
     stage("merge", "--dataset", "0", ds0, ab0, "mixcr", "--dataset", "1", ds1, ab1, "imported",
           "--out-clonotypes", merged, "--out-abundance", abundance,
-          "--out-annotations", tmp / "annotations.tsv")
+          "--out-annotations", tmp / "annotations.tsv", "--out-anchors", tmp / "anchors.tsv")
     stage("split", "--clonotypes", merged, "--abundance", abundance, "--donors", donors_tsv,
           "--out-dir", tmp / "split", *donor_args)
     for d in ("lineages", "nodes", "node-links"):
@@ -147,6 +147,9 @@ def main(tmp: Path) -> None:
     ok("merge keeps dataset names and anchors out of the table the early steps read",
        "data_source" not in merged_columns and "is_anchor" not in merged_columns
        and set(read(tmp / "annotations.tsv")["data_source"]) == {"mixcr", "imported"})
+    ok("the tree step's anchors file carries no dataset names, and no rows without anchors",
+       list(read(tmp / "anchors.tsv").columns) == ["sequence_id", "is_anchor"]
+       and read(tmp / "anchors.tsv").empty)
     ok("collect joins them back: lineages name their data source",
        set(read(tmp / "lineage-stats.tsv")["data_source"]) >= {"mixcr"})
     # The UI reads the last "[==PROGRESS==]" line: a rising percentage, ending at 100%.

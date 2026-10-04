@@ -25,6 +25,7 @@ self.awaitState("clns", { wildcard: "*" }, "InputsLocked")
 self.awaitState("clonotypeTable", "ResourceReady")
 self.awaitState("abundanceTable", "ResourceReady")
 self.awaitState("annotationsTable", "ResourceReady")
+self.awaitState("anchorsTable", "ResourceReady")
 // Null resource when no donor column is picked.
 self.awaitState("donorColumn", "ResourceReady")
 
@@ -366,7 +367,7 @@ self.body(func(inputs) {
 			addFile("clonotypes.tsv", clonotypes).
 			addFile("clones.tsv", clustered.getFile("clones.tsv")).
 			addFile("aligned.tsv", alignedTable, { tag: "aligned" }).
-			addFile("annotations.tsv", inputs.annotationsTable).
+			addFile("annotations.tsv", inputs.anchorsTable).
 			arg("--stage").arg("trees").
 			arg("--annotations").arg("annotations.tsv").
 			arg("--clonotypes").arg("clonotypes.tsv").
