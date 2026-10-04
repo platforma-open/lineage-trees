@@ -62,7 +62,8 @@ const adaptiveNoteOpen = ref(true);
 </script>
 
 <template>
-  <PlAlert v-if="app.model.outputs.settingsProblem" type="warn">
+  <!-- A missing dataset is marked on its field instead. -->
+  <PlAlert v-if="app.model.outputs.settingsProblem && pickedDatasets.length > 0" type="warn">
     {{ app.model.outputs.settingsProblem }}
   </PlAlert>
   <PlDropdownRef
@@ -96,6 +97,8 @@ const adaptiveNoteOpen = ref(true);
     :options="app.model.outputs.inputOptions"
     label="Datasets"
     placeholder="Pick one or more IG datasets"
+    :required="true"
+    :error="pickedDatasets.length === 0 ? 'Input dataset is required' : undefined"
   >
   </PlDropdownMultiRef>
   <PlDropdownMultiRef
