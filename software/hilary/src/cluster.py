@@ -991,6 +991,8 @@ def collect(args: argparse.Namespace) -> None:
             lineage[len(donor) + 1:] if donor and lineage.startswith(donor + "/") else lineage
             for lineage, donor in zip(lineage_stats["lineage_id"], lineage_stats["donor"])
         ]
+    # The full id, exported as the lineage's label so other blocks can show it.
+    lineage_stats["lineage_name"] = lineage_stats["lineage_id"]
     lineage_stats["data_source"] = (
         lineage_stats["lineage_id"].map(_data_sources(lineages, clonotypes)).fillna("")
     )

@@ -1403,12 +1403,32 @@ wf.body(func(args) {
 	maps.forEach(expansion, add(expansionFrameBuilder))
 	expansionFrame := expansionFrameBuilder.build()
 
+	// The lineage axis's label for other blocks, so tables reaching it through the clonotype
+	// link show the id. The full id: with a donor column it carries the donor, unique across donors.
+	lineageName := traced(blockTrace, xsv.importFile(perDonor.output("lineageStats"), "tsv", {
+		axes: [{ column: "lineage_id", spec: lineageAxisSpec }],
+		columns: [{
+			column: "lineage_name",
+			id: "lineageName",
+			spec: {
+				name: "pl7.app/label",
+				valueType: "String",
+				annotations: {
+					"pl7.app/label": "Lineage Id",
+					"pl7.app/description": "The lineage's id, with its donor in front when a donor column is set.",
+					"pl7.app/table/visibility": "default"
+				}
+			}
+		}]
+	}, { splitDataAndSpec: true }))
+
 	// Exported as context and filters only: none is isScore, so none becomes a ranking key.
 	EXPORTED_LINEAGE_STATS := { clusterSize: true, anchorCount: true }
 
 	exportsBuilder := pframes.pFrameBuilder()
 	addExport := add(exportsBuilder)
 	maps.forEach(lineageLinks, addExport)
+	maps.forEach(lineageName, addExport)
 	maps.forEach(lineageStats, func(key, value) {
 		if EXPORTED_LINEAGE_STATS[key] {
 			addExport(key, value)
