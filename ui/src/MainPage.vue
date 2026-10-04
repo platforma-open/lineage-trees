@@ -21,7 +21,7 @@ const view = reactive<{ settingsOpen: boolean; reportOpen: boolean; donor?: stri
 });
 
 const hasDonorColumn = computed(() => app.model.data.donorColumn !== undefined);
-// With no dataset picked, the note above already says what to do.
+// With no dataset picked, Settings marks the field; there is nothing else to fix yet.
 const settingsProblem = computed(() =>
   (app.model.data.datasets ?? []).length === 0 ? undefined : app.model.outputs.settingsProblem,
 );
@@ -67,11 +67,6 @@ watch(
         </template>
       </PlBtnGhost>
     </template>
-
-    <PlAlert v-if="(app.model.data.datasets ?? []).length === 0" type="info">
-      Pick one or more IG clonotyping datasets in Settings to infer lineages from. Bulk heavy chain
-      and paired single cell are both accepted, imported or from MiXCR; TCR is not.
-    </PlAlert>
 
     <!-- Run is disabled with no reason given; say which setting holds it back. -->
     <PlAlert v-if="settingsProblem" type="warn">

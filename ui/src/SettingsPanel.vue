@@ -50,7 +50,7 @@ const advancedOpen = ref(false);
 
 // Derived by the model from the picked specs, so controls match what the workflow does.
 const datasets = computed(() => app.model.outputs.datasets ?? []);
-// MiXCR and imported datasets cluster on different annotations, so no lineage spans both.
+// Imported and MiXCR datasets may name V and J genes from different references.
 const hasImported = computed(() => datasets.value.some((d) => d.alignmentRoute === "upstream"));
 const hasMixcr = computed(() => datasets.value.some((d) => d.alignmentRoute === "mixcr"));
 // An anchor set is one of the picked datasets, so the second picker offers those.
@@ -116,8 +116,8 @@ const adaptiveNoteOpen = ref(true);
     </template>
   </PlDropdownMultiRef>
   <PlAlert v-if="hasImported && hasMixcr" type="warn">
-    You have both imported and MiXCR datasets. Make sure that these datasets are on the same
-    annotation. Otherwise, they may not be clustered together.
+    Imported and MiXCR datasets may use different V/J references. Clonotypes only join a lineage
+    when their V gene, J gene and CDR3 length match, so use the same species and reference for both.
   </PlAlert>
   <PlAccordion :multiple="true">
     <PlAccordionSection v-model="advancedOpen" label="Advanced">
