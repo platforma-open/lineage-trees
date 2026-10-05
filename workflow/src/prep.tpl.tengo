@@ -24,9 +24,10 @@ self.body(func(inputs) {
 		resources({
 			onCPU: {
 				cpu: 2,
-				// Measured at 6.7x + 0.6 GiB.
-				ram: f.size("clonotypes").times(10).plus(f.gib(1)).
-					between(f.gib(2), f.gib(256)).staticFallback(f.gib(6))
+				// Measured at up to 5x + 0.4 GiB on both routes, peaking in the 2 forked reframe
+				// workers. Requested with wide headroom: a real MiXCR run died here above that.
+				ram: f.size("clonotypes").times(12).plus(f.gib(2)).
+					between(f.gib(4), f.gib(256)).staticFallback(f.gib(8))
 			}
 		}).
 		addFile("clonotypes.tsv", clonotypes, { tag: "clonotypes" }).
