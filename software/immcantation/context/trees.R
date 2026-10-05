@@ -77,13 +77,6 @@ threads <- {
   if (is.null(t)) 1L else max(1L, as.integer(t))
 }
 
-# Elapsed wall time as H:MM:SS, from the start of this run unless told otherwise.
-STARTED <- Sys.time()
-clock <- function(since = STARTED) {
-  s <- as.integer(round(as.numeric(difftime(Sys.time(), since, units = "secs"))))
-  sprintf("%d:%02d:%02d", s %/% 3600L, s %/% 60L %% 60L, s %% 60L)
-}
-
 # Tee output to a per-donor log file; `split = TRUE` keeps stdout for the platform log.
 log_path <- opt("--out-log", required = FALSE)
 if (!is.null(log_path)) sink(file(log_path, open = "wt"), split = TRUE)
@@ -126,10 +119,6 @@ fit_workers <- function(want, what) {
 
 HEAVY <- "IGH"
 
-# Progress prefix; the block reads the last line into a bar (tips done over all tips).
-PROGRESS_PREFIX <- "[==PROGRESS==]"
-# Stamped with the elapsed time up front, since the UI reads the percentage off the end.
-progress <- function(text) cat(sprintf("%s [%s] %s\n", PROGRESS_PREFIX, clock(), text))
 pct <- function(n, total) if (total > 0) 100 * n / total else 0
 # The bar moves after every finished lineage, at most this often, in seconds.
 TREE_PROGRESS_EVERY <- 1

@@ -90,12 +90,18 @@ export function useDonorRows() {
 
       // `waiting`: the prior stage is done but this log has not started, so the backend is
       // scheduling it; show it as running, not queued.
-      const stage = (key: DonorStage, waiting: boolean, idleText: string): StageProgress => {
+      // `runText`: shown once the stage's own log runs but has no progress line yet.
+      const stage = (
+        key: DonorStage,
+        waiting: boolean,
+        idleText: string,
+        runText = idleText,
+      ): StageProgress => {
         const h = handle(key);
         if (h !== undefined && !isLiveLog(h)) return { status: "done", text: "Done", percent: 100 };
         if (h === undefined && !waiting) return { status: "not_started", text: "Queued" };
         if (h === undefined) return { status: "running", text: idleText };
-        const { step, percent } = parseLine(lines[key].get(donor), idleText);
+        const { step, percent } = parseLine(lines[key].get(donor), runText);
         return { status: "running", text: step, percent };
       };
 
@@ -119,7 +125,12 @@ export function useDonorRows() {
 
       const progress: Record<Stage, StageProgress> = {
         // Alignments are joined first and allele inference reads them, so joining shows here.
-        alleles: stage("alleles", handle("alignments") !== undefined, "Joining alignments"),
+        alleles: stage(
+          "alleles",
+          handle("alignments") !== undefined,
+          "Joining alignments",
+          "Inferring alleles",
+        ),
         clustering: stage("clustering", done("alleles"), "Lineage clustering"),
         trees: stage("trees", done("clustering"), "Starting"),
         results: results(),

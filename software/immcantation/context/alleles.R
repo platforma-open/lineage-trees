@@ -48,6 +48,7 @@ write_tsv <- function(d, p) write.table(d, p, sep = "\t", quote = FALSE, row.nam
 allele_of <- function(x) sub(",.*$", "", x)
 present <- function(x) !is.na(x) & nzchar(x)
 
+progress("Reading alignments")
 clono <- read_tsv(clonotypes_path)
 aligned <- if (file.exists(aligned_path)) read_tsv(aligned_path) else data.frame()
 
@@ -83,6 +84,7 @@ if ("v_allele" %in% names(clono)) {
   call_of <- ifelse(present(own), own, call_of)
 }
 
+progress("Pooling heavy sequences")
 # The pool: every heavy row with a V side. Positions count from the junction, so they mean
 # the same germline position whatever tool, gapping or start the alignment had.
 left <- suppressWarnings(as.integer(aligned$frame_left))
@@ -190,6 +192,7 @@ say("alignment width: median %d, range %d to %d; junction length median %d, rang
     max(nchar(db$sequence_alignment)), as.integer(median(db$junction_length)),
     min(db$junction_length), max(db$junction_length))
 
+progress("Looking for novel alleles")
 say("looking for novel alleles over %d sequences, single process\n", nrow(db))
 novel <- tryCatch(findNovelAlleles(db, germline_db, pos_range = pos_range, nproc = 1L),
                   error = function(e) e)
@@ -207,6 +210,7 @@ if (max(with_novel) == 1) {
                               length(germline_db), length(per_gene)))
 }
 
+progress("Inferring the genotype")
 say("inferring the genotype\n")
 # `find_unmutated` must be on: only then does `inferGenotype` add the novel alleles. It
 # can also drop reference alleles, which are put back below. With no unmutated sequences
@@ -248,6 +252,7 @@ if (length(put_back)) {
   say("  put back: %s\n", paste(put_back, collapse = ", "))
 }
 
+progress("Reassigning alleles")
 say("reassigning alleles\n")
 reassigned <- tryCatch(reassignAlleles(db, genotype_db), error = function(e) e)
 if (inherits(reassigned, "error")) {
@@ -296,6 +301,7 @@ mismatches <- function(q, g) {
   out
 }
 
+progress("Applying reassignments")
 # Which reassignments to accept. A move to another gene is refused: it would inflate
 # mutations and change the clustering class, and the aligner chose the gene.
 usable_call <- offered & !vapply(genotype_db[allele_of(new_call)], is.null, logical(1))
