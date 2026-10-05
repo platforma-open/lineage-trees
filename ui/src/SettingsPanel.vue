@@ -3,6 +3,7 @@ import {
   CLUSTERING_MODE_OPTIONS,
   IGPHYML_SCOPE_OPTIONS,
   effectiveAnchors,
+  refKey,
 } from "@platforma-open/milaboratories.lineage-trees.model";
 import {
   PlAccordion,
@@ -53,8 +54,14 @@ const datasets = computed(() => app.model.outputs.datasets ?? []);
 // Imported and MiXCR datasets may name V and J genes from different references.
 const hasImported = computed(() => datasets.value.some((d) => d.alignmentRoute === "upstream"));
 const hasMixcr = computed(() => datasets.value.some((d) => d.alignmentRoute === "mixcr"));
-// An anchor set is one of the picked datasets, so the second picker offers those.
-const anchorOptions = computed(() => datasets.value.map((d) => ({ ref: d.ref, label: d.label })));
+// An anchor set is one of the picked datasets; read from inputOptions so the list comes fast.
+const pickedKeys = computed(() => new Set(app.model.data.datasets.map(refKey)));
+const anchorsOff = computed(() => pickedKeys.value.size < 2);
+const anchorOptions = computed(() =>
+  app.model.outputs.inputOptions
+    ?.filter((o) => pickedKeys.value.has(refKey(o.ref)))
+    .sort((a, b) => refKey(a.ref).localeCompare(refKey(b.ref))),
+);
 const outsideDonor = computed(() => app.model.outputs.datasetsOutsideDonorColumn ?? []);
 const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
 // View state, so closing the note is not a block edit; it shows again when the panel reopens.
@@ -100,11 +107,11 @@ const adaptiveNoteOpen = ref(true);
   >
   </PlDropdownMultiRef>
   <PlDropdownMultiRef
-    v-if="datasets.length > 1"
     v-model="pickedAnchors"
     :options="anchorOptions"
+    :disabled="anchorsOff"
     label="Anchor datasets"
-    placeholder="None"
+    :placeholder="anchorsOff ? 'Pick two or more datasets' : 'None'"
   >
     <template #tooltip>
       Datasets of characterised antibodies whose relatives you are looking for in the others. Their
