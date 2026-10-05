@@ -43,7 +43,7 @@
     },
     "meta": {
       "title": "Lineage Trees",
-      "description": "Reconstructs BCR clonal lineages, infers their trees, and scores each clonotype by its position in its family's maturation history.",
+      "description": "Reconstructs BCR clonal lineages, infers their trees, and scores each clonotype by its position in its lineage's maturation history.",
       "longDescription": "file:../docs/description.md",
       "logo": "file:logos/block-logo.png",
       "url": "https://github.com/platforma-open/lineage-trees",
