@@ -73,8 +73,7 @@ const adaptiveNoteOpen = ref(true);
     clearable
   >
     <template #tooltip>
-      Sample metadata naming the subject each sample came from. Clustering runs inside a donor and
-      never across donors.
+      Sample metadata naming the subject each sample came from. Clustering runs inside a donor.
     </template>
   </PlDropdownRef>
   <PlAlert v-if="outsideDonor.length > 0" type="warn">
