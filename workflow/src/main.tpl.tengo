@@ -1205,35 +1205,38 @@ wf.body(func(args) {
 				}]
 			}, { splitDataAndSpec: true })), func(key, value) { anchorDistances[key] = value })
 
-			// Links a candidate to its anchor's columns, one per dataset pair since anchor
-			// sets may share ids. Anchor axis first: links run from the second group to the first.
-			for anchorDs in datasets {
-				if !anchorDs.isAnchor || anchorDs.index == ds.index {
-					continue
-				}
-				pair := idx + "-" + string(anchorDs.index)
-				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("anchorLinks-" + pair), "tsv", {
-					axes: [
-						{ column: "anchor_id", spec: anchorDs.clonotypeAxisSpec },
-						{ column: "sequence_id", spec: ds.clonotypeAxisSpec }
-					],
-					columns: [{
-						column: "link",
-						id: "anchorLink." + ds.key + "." + anchorDs.key,
-						spec: {
-							name: "pl7.app/vdj/nearestAnchor",
-							valueType: "Int",
-							domain: { "pl7.app/clustering/blockId": blockId },
-							annotations: {
-								"pl7.app/isLinkerColumn": "true",
-								"pl7.app/linkLabel": "Anchor",
-								"pl7.app/label": "Nearest anchor",
-								"pl7.app/description": "Links a clonotype to the anchor its mutation count is measured to, so the anchor's own columns can be read beside it."
-							}
-						}
-					}]
-				}, { splitDataAndSpec: true })), func(key, value) { anchorLinks[key] = value })
-			}
+			// Not exported for now: downstream tables reach the anchor's columns through this link
+			// without saying so, and repeat the lineage columns. Back once the SDK can label every
+			// column reached through a linker and stop discovery at it.
+//			// Links a candidate to its anchor's columns, one per dataset pair since anchor
+//			// sets may share ids. Anchor axis first: links run from the second group to the first.
+//			for anchorDs in datasets {
+//				if !anchorDs.isAnchor || anchorDs.index == ds.index {
+//					continue
+//				}
+//				pair := idx + "-" + string(anchorDs.index)
+//				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("anchorLinks-" + pair), "tsv", {
+//					axes: [
+//						{ column: "anchor_id", spec: anchorDs.clonotypeAxisSpec },
+//						{ column: "sequence_id", spec: ds.clonotypeAxisSpec }
+//					],
+//					columns: [{
+//						column: "link",
+//						id: "anchorLink." + ds.key + "." + anchorDs.key,
+//						spec: {
+//							name: "pl7.app/vdj/nearestAnchor",
+//							valueType: "Int",
+//							domain: { "pl7.app/clustering/blockId": blockId },
+//							annotations: {
+//								"pl7.app/isLinkerColumn": "true",
+//								"pl7.app/linkLabel": "Anchor",
+//								"pl7.app/label": "Nearest anchor",
+//								"pl7.app/description": "Links a clonotype to the anchor its mutation count is measured to, so the anchor's own columns can be read beside it."
+//							}
+//						}
+//					}]
+//				}, { splitDataAndSpec: true })), func(key, value) { anchorLinks[key] = value })
+//			}
 		}
 
 		// Each dataset's column is labelled "Members"; the dataset trace tells them apart.
@@ -1439,7 +1442,7 @@ wf.body(func(args) {
 	maps.forEach(aaCdist, add(exportsBuilder))
 	maps.forEach(germlineMutations, add(exportsBuilder))
 	maps.forEach(anchorDistances, add(exportsBuilder))
-	maps.forEach(anchorLinks, add(exportsBuilder))
+//	maps.forEach(anchorLinks, add(exportsBuilder))
 
 	datasetRuns := []
 	for ds in datasets {
