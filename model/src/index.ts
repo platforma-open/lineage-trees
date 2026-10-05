@@ -395,9 +395,9 @@ function datasetLabels(resultPool: ResultPool): Map<string, string> {
 /**
  * Why the settings cannot run, in words for the user, or undefined when they can. `args`
  * throws with it; the platform only disables Run, so the UI shows this text beside it.
+ * A missing dataset is not one: the Datasets field marks it.
  */
 export function settingsProblem(data: BlockData): string | undefined {
-  if (canonicalRefs(data.datasets ?? []).length === 0) return "Pick at least one input dataset.";
   const clusteringMode = data.clusteringMode ?? "fixed";
   if (
     clusteringMode === "fixed" &&
@@ -478,10 +478,11 @@ const dataModel = new DataModelBuilder({ kind })
 
 export const platforma = BlockModelV3.create({ dataModel, kind })
   .args<BlockArgs>((data) => {
+    const datasets = canonicalRefs(data.datasets ?? []);
+    if (datasets.length === 0) throw new Error("No input dataset");
     // The platform shows no reason when this throws, so the UI reads the same check (settingsProblem).
     const problem = settingsProblem(data);
     if (problem !== undefined) throw new Error(problem);
-    const datasets = canonicalRefs(data.datasets ?? []);
     // Anchor refs no longer in `datasets` are dropped rather than failing the run.
     const anchorDatasets = effectiveAnchors(data);
     const clusteringMode = data.clusteringMode ?? "fixed";

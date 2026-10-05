@@ -62,8 +62,7 @@ const adaptiveNoteOpen = ref(true);
 </script>
 
 <template>
-  <!-- A missing dataset is marked on its field instead. -->
-  <PlAlert v-if="app.model.outputs.settingsProblem && pickedDatasets.length > 0" type="warn">
+  <PlAlert v-if="app.model.outputs.settingsProblem" type="warn">
     {{ app.model.outputs.settingsProblem }}
   </PlAlert>
   <PlDropdownRef

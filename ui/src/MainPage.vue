@@ -21,10 +21,6 @@ const view = reactive<{ settingsOpen: boolean; reportOpen: boolean; donor?: stri
 });
 
 const hasDonorColumn = computed(() => app.model.data.donorColumn !== undefined);
-// With no dataset picked, Settings marks the field; there is nothing else to fix yet.
-const settingsProblem = computed(() =>
-  (app.model.data.datasets ?? []).length === 0 ? undefined : app.model.outputs.settingsProblem,
-);
 // Every clonotype is its own lineage: no V, J and CDR3-length group held two.
 const singletonText = computed(() => {
   const donors = app.model.outputs.singletonDonors ?? [];
@@ -69,8 +65,8 @@ watch(
     </template>
 
     <!-- Run is disabled with no reason given; say which setting holds it back. -->
-    <PlAlert v-if="settingsProblem" type="warn">
-      {{ settingsProblem }} Run stays disabled until it is fixed in Settings.
+    <PlAlert v-if="app.model.outputs.settingsProblem" type="warn">
+      {{ app.model.outputs.settingsProblem }} Run stays disabled until it is fixed in Settings.
     </PlAlert>
 
     <PlAlert v-if="app.model.outputs.samplesWithoutDonor?.noneNamed" type="error">
