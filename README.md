@@ -1,14 +1,14 @@
 # Lineage Trees
 
-Reconstruct BCR clonal lineages and rank candidates by where they sit in their family's maturation history. This Platforma block groups clonotypes into clonal families per donor, builds a phylogenetic tree for each family with its ancestral sequences reconstructed, and reports per-clonotype metrics you can rank on: how far a candidate has diverged from its lineage's consensus, and how close it sits along the tree to a known antibody.
+Reconstruct BCR clonal lineages and rank candidates by where they sit in their lineage's maturation history. This Platforma block groups clonotypes into clonal lineages per donor, builds a phylogenetic tree for each lineage with its ancestral sequences reconstructed, and reports per-clonotype metrics you can rank on: how far a candidate has diverged from its lineage's consensus, and how close it sits along the tree to a known antibody.
 
 Open-source analysis block for Platforma, the biologics discovery platform by MiLaboratories. For the full no-code workflow, see [platforma.bio](https://platforma.bio/).
 
 ## What it does
 
-Clonotypes descended from one naive B cell form a clonal family whose members differ by somatic hypermutation, and a candidate's worth often depends on its place in that family rather than on its sequence alone. This block recovers the families, their trees, and the numbers those trees make available.
+Clonotypes descended from one naive B cell form a clonal lineage whose members differ by somatic hypermutation, and a candidate's worth often depends on its place in that lineage rather than on its sequence alone. This block recovers the lineages, their trees, and the numbers those trees make available.
 
-**Lineages.** Clonotypes are clustered with HILARy inside each donor, since shared ancestry only exists within one immune system. Clustering runs on heavy chains, which lets one family hold bulk and single-cell members at once. Light chains are applied afterwards: wherever any picked dataset carries them, anchor sets included, Dowser's `resolveLightChains` splits each heavy-chain clone by light V, J and junction length, and places every heavy-only member with its nearest paired member.
+**Lineages.** Clonotypes are clustered with HILARy inside each donor, since shared ancestry only exists within one immune system. Clustering runs on heavy chains, which lets one lineage hold bulk and single-cell members at once. Light chains are applied afterwards: wherever any picked dataset carries them, anchor sets included, Dowser's `resolveLightChains` splits each heavy-chain clone by light V, J and junction length, and places every heavy-only member with its nearest paired member.
 
 **Germline alleles.** An allele the reference does not know reads as a mutation shared by a whole lineage. Each donor's V alleles are inferred with TIgGER from that donor's own sequences, pooled across its datasets, and every row is rebuilt against the donor's germline before clustering and tree building.
 
