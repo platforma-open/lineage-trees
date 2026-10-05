@@ -190,7 +190,6 @@ say("alignment width: median %d, range %d to %d; junction length median %d, rang
     max(nchar(db$sequence_alignment)), as.integer(median(db$junction_length)),
     min(db$junction_length), max(db$junction_length))
 
-# Single process on purpose: runs died silently here under `mclapply`, for a small speedup.
 say("looking for novel alleles over %d sequences, single process\n", nrow(db))
 novel <- tryCatch(findNovelAlleles(db, germline_db, pos_range = pos_range, nproc = 1L),
                   error = function(e) e)
