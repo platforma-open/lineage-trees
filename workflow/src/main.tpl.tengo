@@ -1029,7 +1029,10 @@ wf.body(func(args) {
 				"pl7.app/label": "Anchor",
 				"pl7.app/description": "Whether the clonotype at this node came from an anchor dataset.",
 				"pl7.app/isDiscreteFilter": "true",
-				"pl7.app/discreteValues": "['true', 'false']"
+				"pl7.app/discreteValues": "['true', 'false']",
+				// Filled shapes when the graph maps shape to this column; its default palette starts
+				// with outlines. 21 is a filled circle like an unmapped dot, 23 a filled diamond.
+				"pl7.app/graph/shape": "{\"mapping\":{\"true\":\"23\",\"false\":\"21\"}}"
 			}
 		})] : [])
 	}, { splitDataAndSpec: true }))
