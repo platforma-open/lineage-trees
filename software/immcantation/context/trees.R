@@ -150,10 +150,12 @@ ANCHOR_COLUMNS <- c("sequence_id", "anchor_id", "anchor_aa_heavy", "anchor_nt_he
                     "anchor_aa_light", "anchor_nt_light")
 
 # Why each lineage got no tree, by lineage id. The first reason recorded stands.
-no_tree <- character(0)
+# An environment, not a named vector: growing a vector one lineage at a time is quadratic.
+no_tree <- new.env(hash = TRUE, parent = emptyenv())
 mark_no_tree <- function(ids, reason) {
-  ids <- setdiff(unique(as.character(ids)), names(no_tree))
-  if (length(ids)) no_tree[ids] <<- reason
+  for (id in unique(as.character(ids))) {
+    if (!exists(id, envir = no_tree, inherits = FALSE)) assign(id, reason, envir = no_tree)
+  }
 }
 as_sentence <- function(s) paste0(toupper(substr(s, 1L, 1L)), substring(s, 2L), ".")
 
@@ -162,7 +164,7 @@ write_builders <- function(lineage_ids, built = data.frame(lineage_id = characte
   if (is.null(builders_path)) return(invisible())
   ids <- unique(c(built$lineage_id, as.character(lineage_ids)))
   builder <- built$tree_builder[match(ids, built$lineage_id)]
-  reason <- ifelse(is.na(builder), unname(no_tree[ids]), NA_character_)
+  reason <- ifelse(is.na(builder), unlist(mget(ids, envir = no_tree, ifnotfound = NA_character_), use.names = FALSE), NA_character_)
   reason[is.na(builder) & is.na(reason)] <- "No tree was built; the trees log has the details."
   write.table(data.frame(lineage_id = ids, tree_builder = builder, no_tree_reason = reason,
                          stringsAsFactors = FALSE),
@@ -565,9 +567,23 @@ if (use_light) {
   # start, which the distance ignores; the trees keep sequence_alignment.
   joined$light_match_seq <- paste0(strrep("N", max(joined$frame_left) - joined$frame_left),
                                    joined$sequence_alignment)
+  # Dowser scans the whole table once per clone, so it gets only the clones a light chain
+  # pairs into, in chunks of clones; the rest get what it returns for a clone without one.
+  heavy_row <- joined$locus == HEAVY
+  pairs <- joined$clone_id %in% joined$clone_id[heavy_row & joined$cell_id %in% joined$cell_id[!heavy_row]]
+  clone_order <- unique(joined$clone_id[heavy_row])
+  rest <- dplyr::mutate(joined[heavy_row & !pairs, , drop = FALSE], vj_gene = "missing", vj_alt_cell = NA,
+                        clone_subgroup = 1, clone_subgroup_id = paste0(clone_id, "_1"), vj_cell = vj_gene)
+  paired <- joined[pairs, , drop = FALSE]
   # minseq 1: a single-member clone still needs a lineage id.
-  resolved <- resolveLightChains(joined, cell = "cell_id", locus = "locus",
-                                 heavy = HEAVY, seq = "light_match_seq", minseq = 1)
+  # ponytail: chunks run one after another; mclapply over them if single-cell donors get large.
+  resolved <- lapply(split(paired, match(paired$clone_id, unique(paired$clone_id)) %/% 1000L), function(d)
+    resolveLightChains(d, cell = "cell_id", locus = "locus", heavy = HEAVY, seq = "light_match_seq", minseq = 1))
+  resolved <- as.data.frame(dplyr::bind_rows(c(resolved, list(rest))))
+  # Dowser's row order, clone by clone: the surrogate ids below are numbered in it.
+  resolved <- resolved[order(match(resolved$clone_id, clone_order)), , drop = FALSE]
+  rownames(resolved) <- NULL
+  rm(rest, paired)
   resolved$light_match_seq <- NULL
   resolved$lineage_id <- resolved$clone_subgroup_id
   h <- resolved[resolved$locus == HEAVY, ]
