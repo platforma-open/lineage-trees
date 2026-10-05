@@ -37,10 +37,10 @@ self.body(func(inputs) {
 		resources({
 			onCPU: {
 				cpu: treeCPUs,
-				// The step holds about 1.5 GiB + 6x aligned and fits its workers, 2.5 GiB each, into
-				// the rest; 24 GiB fits about 7.
-				ram: f.size("aligned").times(8).plus(f.gib(24)).
-					between(f.gib(24), f.gib(256)).staticFallback(f.gib(32))
+				// The step held 13x aligned on a 1.08M-clonotype run (formula assumed 6x) and was killed
+				// building its largest lineages. Requested generously; workers fill only part of it.
+				ram: f.size("aligned").times(16).plus(f.gib(32)).
+					between(f.gib(32), f.gib(256)).staticFallback(f.gib(48))
 			}
 		}).
 		addFile("clonotypes.tsv", inputs.clonotypes).

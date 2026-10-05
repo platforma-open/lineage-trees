@@ -1384,7 +1384,8 @@ fit_pool <- function(want) {
     cat(sprintf("tree builders: %d workers (no memory limit readable, so not bounded)\n", want))
     return(want)
   }
-  fits <- max(1L, as.integer(floor((limit * 0.8 - rss) / WORKER_BUDGET)))
+  # Workers fill 60%, not all of it: the largest lineages go first and can pass their budget.
+  fits <- max(1L, as.integer(floor((limit * 0.6 - rss) / WORKER_BUDGET)))
   got <- min(want, fits)
   cat(sprintf("tree builders: %d of %d workers (%.1f GiB limit, %.1f GiB held here, %.1f GiB budgeted per worker)\n",
               got, want, limit / 2^30, rss / 2^30, WORKER_BUDGET / 2^30))
