@@ -1392,20 +1392,72 @@ fit_pool <- function(want) {
   got
 }
 
+# Lineages this large run one at a time: WORKER_BUDGET was measured on smaller ones, and the
+# largest go first, so without this they would all start together. Smaller ones fill the rest.
+LARGE_LINEAGE <- 1000L
+# No new lineage starts while the container uses more than this share of its limit.
+MEMORY_HIGH <- 0.75
+
+# Anonymous memory of the whole container, so the workers and their tree programs count too.
+container_used <- function() {
+  for (path in c("/sys/fs/cgroup/memory.stat", "/sys/fs/cgroup/memory/memory.stat")) {
+    if (!file.exists(path)) next
+    hit <- grep("^(anon|total_rss) ", readLines(path, warn = FALSE), value = TRUE)
+    if (length(hit)) return(as.numeric(sub("^\\S+ ", "", hit[1])))
+  }
+  NA_real_
+}
+
 # Largest lineage first, so a big one is not the run's tail; clusterApplyLB's loop, inlined.
 run_pool <- function(cl, units) {
   n <- length(units)
   results <- vector("list", n)
-  queue <- order(-vapply(units, function(u) as.numeric(u$size), numeric(1)))
-  sent <- 0L
-  send <- function(node) {
-    sent <<- sent + 1L
-    parallel:::sendCall(cl[[node]], process_unit, list(units[[queue[sent]]]), tag = queue[sent])
+  size <- vapply(units, function(u) as.numeric(u$size), numeric(1))
+  large <- size >= LARGE_LINEAGE
+  pending <- order(-size)
+  idle <- seq_along(cl)
+  running <- 0L
+  large_running <- 0L
+  limit <- memory_limit()
+  waits <- 0L
+  if (any(large)) {
+    cat(sprintf("tree builders: %d lineage(s) of %d or more sequences, built one at a time\n",
+                sum(large), LARGE_LINEAGE))
   }
-  for (node in seq_len(min(length(cl), n))) send(node)
+  # The largest waiting lineage, or while a large one runs, the largest small one.
+  pick <- function() {
+    if (large_running == 0L || !large[pending[1]]) return(1L)
+    small <- which(!large[pending])
+    if (length(small)) small[1] else NA_integer_
+  }
+  # Hands lineages to idle workers until one rule says wait; a finished lineage calls it again.
+  fill <- function() {
+    while (length(idle) && length(pending)) {
+      if (running > 0L && !is.na(limit)) {
+        used <- container_used()
+        if (!is.na(used) && used > MEMORY_HIGH * limit) {
+          waits <<- waits + 1L
+          return(invisible())
+        }
+      }
+      at <- pick()
+      if (is.na(at)) return(invisible())
+      k <- pending[at]
+      pending <<- pending[-at]
+      node <- idle[1]
+      idle <<- idle[-1]
+      running <<- running + 1L
+      if (large[k]) large_running <<- large_running + 1L
+      parallel:::sendCall(cl[[node]], process_unit, list(units[[k]]), tag = k)
+    }
+  }
+  fill()
   for (got in seq_len(n)) {
     r <- parallel:::recvOneResult(cl)
-    if (sent < n) send(r$node)
+    idle <- c(idle, r$node)
+    running <- running - 1L
+    if (large[r$tag]) large_running <- large_running - 1L
+    fill()
     value <- r$value
     if (inherits(value, "try-error")) {
       value <- list(slot = units[[r$tag]]$slot, lid = units[[r$tag]]$lid, label = units[[r$tag]]$label,
@@ -1422,6 +1474,10 @@ run_pool <- function(cl, units) {
       last_tree_progress <<- now
       progress(sprintf("Trees: %.1f%%", 100 * trees_done / max(1, trees_total)))
     }
+  }
+  if (waits > 0L) {
+    cat(sprintf("tree builders: held back a new lineage %d time(s) with memory above %.0f%% of the limit\n",
+                waits, 100 * MEMORY_HIGH))
   }
   results
 }
