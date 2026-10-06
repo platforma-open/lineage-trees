@@ -72,31 +72,6 @@ const adaptiveNoteOpen = ref(true);
   <PlAlert v-if="app.model.outputs.settingsProblem" type="warn">
     {{ app.model.outputs.settingsProblem }}
   </PlAlert>
-  <PlDropdownRef
-    v-model="app.model.data.donorColumn"
-    :options="app.model.outputs.donorOptions"
-    label="Donor column"
-    placeholder="Single donor"
-    clearable
-  >
-    <template #tooltip>
-      Sample metadata naming the subject each sample came from. Clustering runs inside a donor.
-    </template>
-  </PlDropdownRef>
-  <PlAlert v-if="outsideDonor.length > 0" type="warn">
-    The donor column has no samples from {{ outsideDonor.join(", ") }}, so that data is left out of
-    clustering. Clear the donor column to cluster everything as one donor.
-  </PlAlert>
-  <PlAlert v-if="withoutDonor?.noneNamed" type="error">
-    No sample in the picked datasets has a value in the donor column, so nothing can be clustered.
-    Fill in the donor column or clear it.
-  </PlAlert>
-  <PlAlert v-else-if="(withoutDonor?.datasets.length ?? 0) > 0" type="warn">
-    <div v-for="d in withoutDonor?.datasets" :key="d.dataset">
-      {{ d.dataset }}: {{ d.missing }} of {{ d.total }} samples have no donor, so they are left out
-      of clustering.
-    </div>
-  </PlAlert>
   <PlDropdownMultiRef
     v-model="pickedDatasets"
     :options="app.model.outputs.inputOptions"
@@ -123,6 +98,31 @@ const adaptiveNoteOpen = ref(true);
   <PlAlert v-if="hasImported && hasMixcr" type="warn">
     Imported and MiXCR datasets may use different V/J references. Clonotypes only join a lineage
     when their V gene, J gene and CDR3 length match, so use the same species and reference for both.
+  </PlAlert>
+  <PlDropdownRef
+    v-model="app.model.data.donorColumn"
+    :options="app.model.outputs.donorOptions"
+    label="Donor column"
+    placeholder="Single donor"
+    clearable
+  >
+    <template #tooltip>
+      Sample metadata naming the subject each sample came from. Clustering runs inside a donor.
+    </template>
+  </PlDropdownRef>
+  <PlAlert v-if="outsideDonor.length > 0" type="warn">
+    The donor column has no samples from {{ outsideDonor.join(", ") }}, so that data is left out of
+    clustering. Clear the donor column to cluster everything as one donor.
+  </PlAlert>
+  <PlAlert v-if="withoutDonor?.noneNamed" type="error">
+    No sample in the picked datasets has a value in the donor column, so nothing can be clustered.
+    Fill in the donor column or clear it.
+  </PlAlert>
+  <PlAlert v-else-if="(withoutDonor?.datasets.length ?? 0) > 0" type="warn">
+    <div v-for="d in withoutDonor?.datasets" :key="d.dataset">
+      {{ d.dataset }}: {{ d.missing }} of {{ d.total }} samples have no donor, so they are left out
+      of clustering.
+    </div>
   </PlAlert>
   <PlAccordion :multiple="true">
     <PlAccordionSection v-model="advancedOpen" label="Advanced">
