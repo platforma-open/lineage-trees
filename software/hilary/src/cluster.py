@@ -716,6 +716,7 @@ def _write_per_dataset(
     expansion: pd.DataFrame,
     anchor_distances: pd.DataFrame,
     germline_mutations: pd.DataFrame,
+    anchor_labels: pd.Series,
 ) -> None:
     """Write each dataset's rows with the id prefix removed; every file exists, even if empty."""
     args.per_dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -761,9 +762,12 @@ def _write_per_dataset(
             })
             linked.to_csv(
                 out / f"anchor-links-{index}-{anchor_index}.tsv", sep="\t", index=False)
-        # The anchor id loses its prefix too, as its own dataset knows it.
+        # The anchor's readable label where its producer gives one (MiXCR's Clone Id), else its id
+        # as its own dataset knows it. The links above keep the id: it is their join key.
         if not distances.empty:
-            distances["anchor_id"] = unprefixed(distances["anchor_id"])
+            label = distances["anchor_id"].map(anchor_labels)
+            distances["anchor_id"] = label.where(label.notna() & (label != ""),
+                                                 unprefixed(distances["anchor_id"]))
         distances.reindex(columns=ANCHOR_DISTANCE_COLUMNS).to_csv(
             out / f"anchor-distances-{index}.tsv", sep="\t", index=False)
 
@@ -1020,9 +1024,12 @@ def collect(args: argparse.Namespace) -> None:
 
     step("Writing per-dataset tables")
     cdist = _concat(cdist_parts, AA_CDIST_COLUMNS)
+    anchor_labels = (
+        clonotypes.drop_duplicates("sequence_id").set_index("sequence_id")["clone_label"]
+        if "clone_label" in clonotypes.columns else pd.Series(dtype=str))
     _write_per_dataset(args, lineages, links, cdist, support, expansion,
                        _concat(distance_parts, ANCHOR_DISTANCE_COLUMNS),
-                       _concat(germline_parts, GERMLINE_MUTATION_COLUMNS))
+                       _concat(germline_parts, GERMLINE_MUTATION_COLUMNS), anchor_labels)
 
     # Per-donor counts for the overview; names match the workflow's groups.
     if args.out_donor_stats is not None:

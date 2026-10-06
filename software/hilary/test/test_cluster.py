@@ -271,6 +271,34 @@ def main(tmp: Path) -> None:
        member_stats.loc["L1", "no_tree_reason"] == why and member_stats.loc["L1", "tip_count"] == "0"
        and member_stats.loc["L2", "tip_count"] == "1" and member_stats.loc["L2", "no_tree_reason"] == "")
 
+    # "Nearest anchor" shows the anchor's Clone Id where it has one, else its id; the links
+    # keep the id, since it keys the anchor's axis.
+    anc = tmp / "anchor-collect"
+    for d in ("lineages", "nodes", "node-links", "anchor-distances", "out"):
+        (anc / d).mkdir(parents=True)
+    write(anc / "lineages" / "donor-0.tsv", [
+        {"sequence_id": s, "lineage_id": "L1", "link": 1, "group_id": s}
+        for s in ("0_a", "0_b", "1_x", "1_y")])
+    write(anc / "nodes" / "donor-0.tsv", [{**node_row, "lineage_id": "L1", "node_id": "1",
+                                           "is_observed": "true", "label": "0_a", "node_depth": "1"}])
+    write(anc / "node-links" / "donor-0.tsv", [{"lineage_id": "L1", "node_id": "1",
+                                                "sequence_id": "0_a", "link": 1, "is_representative": "true"}])
+    blank = {"anchor_nt_heavy": 0, "anchor_aa_light": "", "anchor_nt_light": ""}
+    write(anc / "anchor-distances" / "donor-0.tsv", [
+        {"sequence_id": "0_a", "anchor_id": "1_x", "anchor_aa_heavy": 2, **blank},
+        {"sequence_id": "0_b", "anchor_id": "1_y", "anchor_aa_heavy": 3, **blank}])
+    stage("collect", "--lineages-dir", anc / "lineages", "--nodes-dir", anc / "nodes",
+          "--node-links-dir", anc / "node-links", "--anchor-distances-dir", anc / "anchor-distances",
+          "--clonotypes", write(anc / "clonotypes.tsv", [
+              {"sequence_id": "0_a", "clone_label": "7"}, {"sequence_id": "0_b", "clone_label": ""},
+              {"sequence_id": "1_x", "clone_label": "42"}, {"sequence_id": "1_y", "clone_label": ""}]),
+          "--dataset", "0", "--dataset", "1", "--anchor", "1", "--per-dataset-dir", anc / "out",
+          "--out-nodes", anc / "nodes.tsv", "--out-lineage-stats", anc / "stats.tsv")
+    nearest = dict(zip(*read(anc / "out" / "anchor-distances-0.tsv")[["sequence_id", "anchor_id"]].T.values))
+    linked = sorted(read(anc / "out" / "anchor-links-0-1.tsv")["anchor_id"])
+    ok("nearest anchor shows the anchor's Clone Id, else its id; links keep the id",
+       nearest == {"a": "42", "b": "y"} and linked == ["x", "y"])
+
     # The full method compares rows base by base, so padding must not read as a difference:
     # a member with shorter 5' and 3' coverage pads with its gene's germline, not N.
     v_side, j_side = "ACGTACGTACGTAAAACCCCGGGG", "TTTGGGCCC"

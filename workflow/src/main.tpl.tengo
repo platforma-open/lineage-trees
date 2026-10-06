@@ -1199,7 +1199,7 @@ wf.body(func(args) {
 						domain: { "pl7.app/clustering/blockId": blockId },
 						annotations: {
 							"pl7.app/label": "Nearest anchor",
-							"pl7.app/description": "The anchor clonotype the mutation count is measured to.",
+							"pl7.app/description": "The anchor clonotype the mutation count is measured to: its Clone Id where the producer gives one, else its id.",
 							"pl7.app/table/fontFamily": "monospace",
 							"pl7.app/table/orderPriority": "86400"
 						}
