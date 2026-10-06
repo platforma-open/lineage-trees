@@ -6,6 +6,7 @@ import {
   PlMaskIcon24,
   PlSlideModal,
 } from "@platforma-sdk/ui-vue";
+import { defaultSubtitle } from "@platforma-open/milaboratories.lineage-trees.model";
 import { computed, reactive, watch } from "vue";
 import DonorReportPanel from "./DonorReportPanel.vue";
 import DonorTable from "./DonorTable.vue";
@@ -60,7 +61,10 @@ watch(
 </script>
 
 <template>
-  <PlBlockPage>
+  <PlBlockPage
+    v-model:subtitle="app.model.data.customBlockLabel"
+    :subtitle-placeholder="defaultSubtitle(app.model.data)"
+  >
     <template #title>Lineage Trees</template>
 
     <template #append>

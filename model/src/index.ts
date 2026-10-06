@@ -111,6 +111,8 @@ export type BlockData = {
   expansionGraphState: GraphMakerState;
   /** Named sets of collected nodes, one section each. UI-only, never projected. Absent on older projects. */
   baskets: NodeBasket[];
+  /** Subtitle the user typed; empty or absent falls back to `defaultSubtitle`. Absent on older projects. */
+  customBlockLabel?: string;
 };
 
 /** Ids point into the `runKey` run; the rest is copied so the entry survives a rerun. */
@@ -435,6 +437,18 @@ export function settingsProblem(data: BlockData): string | undefined {
     return "Minimum tips per tree must be a whole number between 2 and the maximum.";
   }
   return undefined;
+}
+
+/** Block subtitle from the clustering settings, short form of the workflow's trace label. */
+export function defaultSubtitle(data: BlockData): string {
+  const parts =
+    (data.clusteringMode ?? "fixed") === "adaptive"
+      ? [`HILARy adaptive, precision ${data.precision}`, `sensitivity ${data.sensitivity}`]
+      : [`HILARy fixed, threshold ${data.clusteringThreshold}`];
+  if (data.igPhyMLScope === "anchored") parts.push("IgPhyML on anchored lineages");
+  if (data.igPhyMLScope === "all") parts.push("IgPhyML on all lineages");
+  if (data.maxTipsPerTree !== undefined) parts.push(`max ${data.maxTipsPerTree} tips`);
+  return parts.join(", ");
 }
 
 /** A new block's data; tests start from it too. A template can seed only `clusteringThreshold`. */
@@ -1046,6 +1060,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   .output("isRunning", (ctx) => ctx.outputs?.getIsReadyOrError() === false)
   /** A run has finished, with or without an error: an empty table then means no donors. */
   .output("runFinished", (ctx) => ctx.outputs?.getIsReadyOrError() === true)
+
+  .subtitle((ctx) => ctx.data.customBlockLabel || defaultSubtitle(ctx.data))
 
   .sections((ctx) => {
     const trees = currentViews(ctx.data.treeViews, runIdOf(ctx.outputs)).map((v) => ({
