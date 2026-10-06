@@ -1,6 +1,11 @@
 // Node tables for a lineage, a path or a basket, with shared leading columns and order.
 import type { PColumn, TreeNodeAccessor } from "@platforma-sdk/model";
-import { DataColumn, createPlDataTableV3, getAxisId } from "@platforma-sdk/model";
+import {
+  DataColumn,
+  createPlDataTableV3,
+  getAxisId,
+  upgradePlDataTableStateV2,
+} from "@platforma-sdk/model";
 
 /** Distance from the germline in nodes; orders path tables. */
 export const NODE_DEPTH_COLUMN = "pl7.app/dendrogram/nodeDepth";
@@ -86,7 +91,12 @@ export const byDepth = (parts: NodeTableParts) => ({
   naAndAbsentAreLeastValues: true,
 });
 
-/** A node table with the path table's columns and ordering. */
+/**
+ * A node table with the path table's columns and ordering. `filters` is the view itself (its
+ * lineage, its nodes), not a user filter: the SDK would show it in the filter panel as a default
+ * filter, where clearing it shows every lineage. So a saved view's default filters are ignored,
+ * and the panel gets none.
+ */
 export function nodeTable(
   ctx: Parameters<typeof createPlDataTableV3>[0],
   parts: NodeTableParts,
@@ -94,12 +104,17 @@ export function nodeTable(
   filters: TableOptions["filters"],
   sorting: TableOptions["sorting"] = [byDepth(parts)],
 ) {
-  return createPlDataTableV3(ctx, {
+  const state = upgradePlDataTableStateV2(tableState);
+  const table = createPlDataTableV3(ctx, {
     primaryColumns: parts.leading,
     columns: parts.rest,
-    tableState,
+    tableState:
+      state.pTableParams.sourceId === null
+        ? state
+        : { ...state, pTableParams: { ...state.pTableParams, defaultFilters: null } },
     displayOptions: PATH_DISPLAY_OPTIONS,
     filters,
     sorting,
   });
+  return table === undefined ? undefined : { ...table, defaultFilters: undefined };
 }
