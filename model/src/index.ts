@@ -40,6 +40,18 @@ export const PROGRESS_PREFIX = "[==PROGRESS==]";
 const LINEAGE_SIZE_COLUMN = "pl7.app/clustering/clusterSize";
 
 /** Content id of the run's trees. Lineage and node ids are valid only within it. Undefined until a run settles. */
+/** Tree node columns plus each sequence list's hits per node, as the tree graph shows them. */
+function nodeColumnsWithHits(outputs: TreeNodeAccessor | undefined) {
+  const columns = outputs?.resolve("treeNodes")?.getPColumns();
+  if (columns === undefined) return undefined;
+  const hits = (
+    outputs
+      ?.resolve({ field: "soiNodesResults", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.mapFields((_, v) => v?.getPColumns() ?? []) ?? []
+  ).flat();
+  return [...columns, ...hits];
+}
+
 function runIdOf(outputs: TreeNodeAccessor | undefined): string | undefined {
   return outputs
     ?.resolve({ field: "runId", allowPermanentAbsence: true, stableIfNotFound: true })
@@ -954,7 +966,7 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   .outputWithStatus("treeNodeTables", (ctx) => {
     const views = currentViews(ctx.data.treeViews, runIdOf(ctx.outputs));
     if (views.length === 0) return undefined;
-    const parts = nodeTableParts(ctx.outputs?.resolve("treeNodes")?.getPColumns());
+    const parts = nodeTableParts(nodeColumnsWithHits(ctx.outputs));
     if (parts === undefined) return undefined;
 
     const tables: Record<string, PlDataTableModel> = {};
@@ -974,7 +986,7 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       (view) => view.nodeIds.length > 0,
     );
     if (views.length === 0) return undefined;
-    const parts = nodeTableParts(ctx.outputs?.resolve("treeNodes")?.getPColumns());
+    const parts = nodeTableParts(nodeColumnsWithHits(ctx.outputs));
     if (parts === undefined) return undefined;
 
     const tables: Record<string, PlDataTableModel> = {};
@@ -998,7 +1010,7 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     const baskets = ctx.data.baskets ?? [];
     const runKey = runIdOf(ctx.outputs);
     if (baskets.length === 0 || runKey === undefined) return undefined;
-    const parts = nodeTableParts(ctx.outputs?.resolve("treeNodes")?.getPColumns());
+    const parts = nodeTableParts(nodeColumnsWithHits(ctx.outputs));
     if (parts === undefined) return undefined;
 
     const tables: Record<string, PlDataTableModel> = {};
