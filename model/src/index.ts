@@ -534,6 +534,21 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   )
 
   /**
+   * Each offered dataset's alignment route, keyed by `refKey`. Reads no settings, so it is
+   * ready before a pick and the UI can say at once what a picked dataset lacks.
+   */
+  .output("alignmentRoutes", (ctx): Record<string, AlignmentSource> => {
+    const specs = ctx.resultPool.getSpecs().entries.map((entry) => entry.obj);
+    const out: Record<string, AlignmentSource> = {};
+    for (const option of ctx.resultPool.getOptions(DATASET_QUERY)) {
+      const spec = ctx.resultPool.getPColumnSpecByRef(option.ref);
+      if (spec === undefined || datasetModality(spec) === undefined) continue;
+      out[refKey(option.ref)] = alignmentRouteFor(spec, specs);
+    }
+    return out;
+  })
+
+  /**
    * Sample columns that can name a donor: `pl7.app/metadata` or `pl7.app/label`, on the sample
    * axis of a picked dataset or of the chosen column, so the choice stays listed. All of them
    * before anything is picked.

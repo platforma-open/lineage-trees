@@ -62,6 +62,13 @@ const anchorOptions = computed(() =>
     ?.filter((o) => pickedKeys.value.has(refKey(o.ref)))
     .sort((a, b) => refKey(a.ref).localeCompare(refKey(b.ref))),
 );
+// Picked datasets with neither MiXCR alignments nor alignment columns: no germline, so no trees.
+const unaligned = computed(() => {
+  const routes = app.model.outputs.alignmentRoutes ?? {};
+  return (app.model.outputs.inputOptions ?? [])
+    .filter((o) => pickedKeys.value.has(refKey(o.ref)) && routes[refKey(o.ref)] === "none")
+    .map((o) => o.label);
+});
 const outsideDonor = computed(() => app.model.outputs.datasetsOutsideDonorColumn ?? []);
 const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
 // View state, so closing the note is not a block edit; it shows again when the panel reopens.
@@ -95,6 +102,10 @@ const adaptiveNoteOpen = ref(true);
       the nearest anchor, which is exported for ranking.
     </template>
   </PlDropdownMultiRef>
+  <PlAlert v-if="unaligned.length > 0" type="warn">
+    {{ unaligned.join(", ") }} {{ unaligned.length === 1 ? "has" : "have" }} no germline alignment,
+    so {{ unaligned.length === 1 ? "its" : "their" }} clonotypes join lineages but get no trees.
+  </PlAlert>
   <PlAlert v-if="hasImported && hasMixcr" type="warn">
     Imported and MiXCR datasets may use different V/J references. Clonotypes only join a lineage
     when their V gene, J gene and CDR3 length match, so use the same species and reference for both.
