@@ -96,7 +96,8 @@ def main(tmp: Path) -> None:
     merged, abundance = tmp / "merged.tsv", tmp / "abundance.tsv"
     stage("merge", "--dataset", "0", ds0, ab0, "mixcr", "--dataset", "1", ds1, ab1, "imported",
           "--out-clonotypes", merged, "--out-abundance", abundance,
-          "--out-annotations", tmp / "annotations.tsv", "--out-anchors", tmp / "anchors.tsv")
+          "--out-annotations", tmp / "annotations.tsv", "--out-anchors", tmp / "anchors.tsv",
+          "--out-gene-usage", tmp / "gene-usage.json")
     stage("split", "--clonotypes", merged, "--abundance", abundance, "--donors", donors_tsv,
           "--out-dir", tmp / "split", *donor_args)
     for d in ("lineages", "nodes", "node-links"):
@@ -147,6 +148,15 @@ def main(tmp: Path) -> None:
     ok("merge keeps dataset names and anchors out of the table the early steps read",
        "data_source" not in merged_columns and "is_anchor" not in merged_columns
        and set(read(tmp / "annotations.tsv")["data_source"]) == {"mixcr", "imported"})
+    usage = json.loads((tmp / "gene-usage.json").read_text())
+    merged_rows = read(merged)
+    first_gene = lambda c: c.split(",")[0].split("*")[0]
+    expected = {ds: {} for ds in set(merged_rows["dataset"])}
+    for ds, call in zip(merged_rows["dataset"], merged_rows["v_call"]):
+        if call:
+            expected[ds][first_gene(call)] = expected[ds].get(first_gene(call), 0) + 1
+    ok("merge counts each dataset's clonotypes per V gene, alleles dropped",
+       {ds: u.get("v", {}) for ds, u in usage.items()} == expected)
     ok("the tree step's anchors file carries no dataset names, and no rows without anchors",
        list(read(tmp / "anchors.tsv").columns) == ["sequence_id", "is_anchor"]
        and read(tmp / "anchors.tsv").empty)

@@ -366,7 +366,8 @@ wf.body(func(args) {
 		arg("--out-clonotypes").arg("clonotypes.tsv").
 		arg("--out-abundance").arg("abundance.tsv").
 		arg("--out-annotations").arg("annotations.tsv").
-		arg("--out-anchors").arg("anchors.tsv")
+		arg("--out-anchors").arg("anchors.tsv").
+		arg("--out-gene-usage").arg("gene-usage.json")
 	for ds in datasets {
 		idx := string(ds.index)
 		mergeCmd.addFile("clonotypes-" + idx + ".tsv", ds.clonotypeTable, { tag: "mergeInput" }).
@@ -384,6 +385,7 @@ wf.body(func(args) {
 		saveFile("abundance.tsv").
 		saveFile("annotations.tsv").
 		saveFile("anchors.tsv").
+		saveFileContent("gene-usage.json").
 		saveStdoutContent().
 		printErrStreamToStdout().
 		run()
@@ -1463,6 +1465,8 @@ wf.body(func(args) {
 			expansionPlot: pframes.exportFrame(expansionFrame),
 			treeNodes: pframes.exportFrame(treeNodesFrame),
 			mergeLog: merged.getStdoutContent(),
+			// Clonotypes per V and J gene per dataset; the model checks the datasets name genes alike.
+			geneUsage: merged.getFileContent("gene-usage.json"),
 			clusteringLog: perDonor.output("clusteringLog"),
 			treesLog: perDonor.output("treesLog"),
 			// Per-donor live streams and the allele route each donor took.

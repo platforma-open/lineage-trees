@@ -49,11 +49,6 @@ const pickedAnchors = computed({
 });
 const advancedOpen = ref(false);
 
-// Derived by the model from the picked specs, so controls match what the workflow does.
-const datasets = computed(() => app.model.outputs.datasets ?? []);
-// Imported and MiXCR datasets may name V and J genes from different references.
-const hasImported = computed(() => datasets.value.some((d) => d.alignmentRoute === "upstream"));
-const hasMixcr = computed(() => datasets.value.some((d) => d.alignmentRoute === "mixcr"));
 // An anchor set is one of the picked datasets; read from inputOptions so the list comes fast.
 const pickedKeys = computed(() => new Set(app.model.data.datasets.map(refKey)));
 const anchorsOff = computed(() => pickedKeys.value.size < 2);
@@ -105,10 +100,6 @@ const adaptiveNoteOpen = ref(true);
   <PlAlert v-if="unaligned.length > 0" type="warn">
     {{ unaligned.join(", ") }} {{ unaligned.length === 1 ? "has" : "have" }} no germline alignment,
     so {{ unaligned.length === 1 ? "its" : "their" }} clonotypes join lineages but get no trees.
-  </PlAlert>
-  <PlAlert v-if="hasImported && hasMixcr" type="warn">
-    Imported and MiXCR datasets may use different V/J references. Clonotypes only join a lineage
-    when their V gene, J gene and CDR3 length match, so use the same species and reference for both.
   </PlAlert>
   <PlDropdownRef
     v-model="app.model.data.donorColumn"

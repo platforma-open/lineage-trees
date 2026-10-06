@@ -258,6 +258,19 @@ def merge(args: argparse.Namespace) -> None:
         print(f"dataset {index}: {len(clonotypes)} clonotypes, {len(abundance)} abundance rows "
               f"({data_source})", file=sys.stderr)
     merged = pd.concat(clonotype_parts, ignore_index=True).fillna("")
+    # Clonotypes per heavy V and J gene and dataset, so the block can tell whether two datasets
+    # name genes alike: clustering only compares clonotypes of the same V and J gene.
+    if args.out_gene_usage is not None:
+        first_gene = lambda calls: calls.astype(str).str.split(",", n=1).str[0].str.split("*", n=1).str[0]
+        usage: dict = {}
+        for kind in ("v", "j"):
+            column = f"{kind}_call"
+            if column not in merged.columns:
+                continue
+            genes = merged.assign(gene=first_gene(merged[column]))
+            for (dataset, gene), count in genes[genes["gene"] != ""].groupby(["dataset", "gene"]).size().items():
+                usage.setdefault(str(dataset), {}).setdefault(kind, {})[gene] = int(count)
+        args.out_gene_usage.write_text(json.dumps(usage, sort_keys=True))
     # Dataset names and anchors go apart: only the tree step and collect read them, so
     # renaming a dataset or toggling an anchor leaves the table alignment, allele inference
     # and clustering read unchanged, and their results are reused.
@@ -1071,6 +1084,8 @@ def main() -> None:
                    help="dataset name and anchor flag per clonotype, kept out of --out-clonotypes")
     m.add_argument("--out-anchors", type=Path,
                    help="sequence_id and is_anchor of the anchor clonotypes only, for the tree step")
+    m.add_argument("--out-gene-usage", type=Path,
+                   help="JSON: clonotypes per heavy V and J gene, per dataset")
     m.set_defaults(func=merge)
 
     sp = stages.add_parser("split", help="one clonotype table per donor")

@@ -193,6 +193,14 @@ export type Modality = "bulk-heavy" | "paired-sc";
 export type AlignmentSource = "mixcr" | "upstream" | "none";
 
 /** Per donor group, what the overview shows beside its progress. */
+/** A gene one source (MiXCR or imported datasets) uses and the other never does. */
+export type GeneMismatch = { gene: string; source: "MiXCR" | "imported"; share: number };
+
+/** A gene counts once it carries this share of a source's clonotypes... */
+const GENE_MISMATCH_SHARE = 0.01;
+/** ...and the other source is large enough that this many of its clonotypes would carry it. */
+const GENE_MISMATCH_EXPECTED = 10;
+
 export type DonorStats = { donor: string; clonotype_count: number; lineage_count: number };
 
 /** The group a run without a donor column clusters as; the workflow names it the same. */
@@ -666,6 +674,63 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       if (name !== undefined) donors.add(name);
     }
     return [...donors].sort();
+  })
+
+  /**
+   * From the last run: genes common in one source (MiXCR or imported datasets) that the other,
+   * large enough to show them, never uses. That usually means the two were annotated against
+   * different references, and such clonotypes cannot join lineages across the sources.
+   * Undefined before a run.
+   */
+  .output("geneMismatch", (ctx): GeneMismatch[] | undefined => {
+    const args = ctx.activeArgs;
+    if (args === undefined) return undefined;
+    const usage = ctx.outputs
+      ?.resolve({ field: "geneUsage", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.getDataAsJson<Record<string, Partial<Record<"v" | "j", Record<string, number>>>>>();
+    if (usage === undefined) return undefined;
+    const specs = ctx.resultPool.getSpecs().entries.map((entry) => entry.obj);
+    // Gene counts per source; merge numbers datasets by their position in args.
+    const sources = {
+      MiXCR: [] as Record<string, number>[],
+      imported: [] as Record<string, number>[],
+    };
+    const byKind = (kind: "v" | "j", source: keyof typeof sources) => {
+      const counts: Record<string, number> = {};
+      for (const dataset of sources[source]) {
+        for (const [gene, n] of Object.entries(dataset)) counts[gene] = (counts[gene] ?? 0) + n;
+      }
+      return counts;
+    };
+    const out: GeneMismatch[] = [];
+    for (const kind of ["v", "j"] as const) {
+      sources.MiXCR = [];
+      sources.imported = [];
+      args.datasets.forEach((ref, i) => {
+        const spec = ctx.resultPool.getPColumnSpecByRef(ref);
+        const counts = usage[String(i)]?.[kind];
+        if (spec === undefined || counts === undefined) return;
+        const source = alignmentRouteFor(spec, specs) === "mixcr" ? "MiXCR" : "imported";
+        sources[source].push(counts);
+      });
+      const mixcr = byKind(kind, "MiXCR");
+      const imported = byKind(kind, "imported");
+      for (const [source, own, other] of [
+        ["MiXCR", mixcr, imported],
+        ["imported", imported, mixcr],
+      ] as const) {
+        const total = Object.values(own).reduce((a, b) => a + b, 0);
+        const otherTotal = Object.values(other).reduce((a, b) => a + b, 0);
+        if (total === 0 || otherTotal === 0) continue;
+        for (const [gene, n] of Object.entries(own)) {
+          const share = n / total;
+          if (share < GENE_MISMATCH_SHARE || other[gene] !== undefined) continue;
+          if (share * otherTotal < GENE_MISMATCH_EXPECTED) continue;
+          out.push({ gene, source, share });
+        }
+      }
+    }
+    return out.sort((a, b) => b.share - a.share);
   })
 
   /** What ran. Reads `activeArgs` so it matches the results on screen, not unrun edits. */

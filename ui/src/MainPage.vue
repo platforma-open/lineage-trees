@@ -22,6 +22,14 @@ const view = reactive<{ settingsOpen: boolean; reportOpen: boolean; donor?: stri
 
 const hasDonorColumn = computed(() => app.model.data.donorColumn !== undefined);
 // Every clonotype is its own lineage: no V, J and CDR3-length group held two.
+// Five genes are enough to see the pattern; the share is of that source's clonotypes.
+const geneMismatch = computed(() => app.model.outputs.geneMismatch ?? []);
+const geneMismatchText = computed(() =>
+  geneMismatch.value
+    .slice(0, 5)
+    .map((g) => `${g.gene} (${g.source}, ${(100 * g.share).toFixed(0)}%)`)
+    .join(", "),
+);
 const singletonText = computed(() => {
   const donors = app.model.outputs.singletonDonors ?? [];
   if (donors.length === 0) return undefined;
@@ -81,6 +89,15 @@ watch(
     <!-- With single-clonotype lineages that line already says why no tree was built. -->
     <PlAlert v-if="app.model.outputs.noTreesReason && !singletonText" type="warn">
       {{ app.model.outputs.noTreesReason }} Double-click a donor to open its logs.
+    </PlAlert>
+
+    <!-- Common genes one source never uses: the references likely name them differently. -->
+    <PlAlert v-if="geneMismatch.length > 0" type="warn">
+      Some V/J genes are common in the {{ geneMismatch[0].source }} datasets but never appear in the
+      {{ geneMismatch[0].source === "MiXCR" ? "imported" : "MiXCR" }} ones, which usually means the
+      two were annotated against different references. Clonotypes only join a lineage when their V
+      gene, J gene and CDR3 length match, so these did not cluster across the two:
+      {{ geneMismatchText }}.
     </PlAlert>
 
     <div :style="{ flex: 1 }">
