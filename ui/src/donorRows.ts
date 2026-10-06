@@ -91,14 +91,19 @@ export function useDonorRows() {
       // `waiting`: the prior stage is done but this log has not started, so the backend is
       // scheduling it; show it as running, not queued.
       // `runText`: shown once the stage's own log runs but has no progress line yet.
+      // `nextStarted`: the following stage reads this one's output, so it is done even if its
+      // log still reads as open.
       const stage = (
         key: DonorStage,
         waiting: boolean,
         idleText: string,
         runText = idleText,
+        nextStarted = false,
       ): StageProgress => {
         const h = handle(key);
-        if (h !== undefined && !isLiveLog(h)) return { status: "done", text: "Done", percent: 100 };
+        if (h !== undefined && (!isLiveLog(h) || nextStarted)) {
+          return { status: "done", text: "Done", percent: 100 };
+        }
         if (h === undefined && !waiting) return { status: "not_started", text: "Queued" };
         if (h === undefined) return { status: "running", text: idleText };
         const { step, percent } = parseLine(lines[key].get(donor), runText);
@@ -130,9 +135,16 @@ export function useDonorRows() {
           handle("alignments") !== undefined,
           "Joining alignments",
           "Inferring alleles",
+          handle("clustering") !== undefined,
         ),
-        clustering: stage("clustering", done("alleles"), "Lineage clustering"),
-        trees: stage("trees", done("clustering"), "Starting"),
+        clustering: stage(
+          "clustering",
+          done("alleles"),
+          "Lineage clustering",
+          "Lineage clustering",
+          handle("trees") !== undefined,
+        ),
+        trees: stage("trees", done("clustering"), "Starting", "Starting", collectLog !== undefined),
         results: results(),
       };
       // A donor with no clonotypes finishes every stage on nothing; say so rather than "Done".
