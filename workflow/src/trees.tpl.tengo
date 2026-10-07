@@ -29,18 +29,19 @@ self.defineOutputs("lineages", "nodes", "nodeLinks", "builders", "aaCdist", "ger
 self.body(func(inputs) {
 	params := inputs.params
 
-	// FastTree and RAxML run one single-threaded job per worker, so cores scale
-	// linearly; IgPhyML is one heavy process.
-	treeCPUs := params.igPhyMLScope != "none" ? 2 : 16
+	// FastTree and RAxML run one single-threaded job per worker, so cores scale with the
+	// donor; IgPhyML is one heavy process. trees.R fits workers to 60% of the limit at
+	// 2.5 GiB each, so 8 cores was all the old 16-core, 48 GiB request could use.
+	treeCPUs := params.igPhyMLScope != "none" ? f.const(2).staticFallback(2) :
+		f.size("aligned").dividedBy(f.mib(64)).between(2, 8).staticFallback(8)
 	treesCmd := exec.builder().
 		software(immcantationSw).
 		resources({
 			onCPU: {
 				cpu: treeCPUs,
-				// The step held 13x aligned on a 1.08M-clonotype run (formula assumed 6x) and was killed
-				// building its largest lineages. Requested generously; workers fill only part of it.
-				ram: f.size("aligned").times(16).plus(f.gib(32)).
-					between(f.gib(32), f.gib(256)).staticFallback(f.gib(48))
+				// The step held 13x aligned on a 1.08M-clonotype run, plus 4 GiB per worker.
+				ram: f.size("aligned").times(16).plus(treeCPUs.times(f.gib(4))).
+					between(f.gib(8), f.gib(256)).staticFallback(f.gib(48))
 			}
 		}).
 		addFile("clonotypes.tsv", inputs.clonotypes).
@@ -55,7 +56,7 @@ self.body(func(inputs) {
 		arg("--aligned").arg("aligned.tsv").
 		arg("--abundance").arg("abundance.tsv").
 		arg("--igphyml-scope").arg(params.igPhyMLScope).
-		arg("--threads").arg(string(treeCPUs)).
+		arg("--threads").argExpr("{system.cpu}").
 		arg("--out-log").arg("trees.log").
 		arg("--out-lineages").arg("lineages.tsv").
 		arg("--out-nodes").arg("nodes.tsv").
