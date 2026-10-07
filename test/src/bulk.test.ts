@@ -67,6 +67,40 @@ blockTest(
   },
 );
 
+// exportAirr finds an uploaded library only as a file beside the clns. Two uploads of one
+// file get two library ids; the third dataset uses MiXCR's built-in library.
+blockTest(
+  "alpaca with uploaded germline libraries",
+  { timeout: TIMEOUT },
+  async ({ rawPrj, helpers, expect, ml }) => {
+    const ctx = { rawPrj, helpers, expect, ml };
+    const { blockId: sndBlockId } = await addSamples(ctx, {
+      fastq: [{ label: "Alpaca", samples: [ALPACA] }],
+    });
+    const mixcrBlockIds: string[] = [];
+    for (const [label, libraryAsset] of [
+      ["Uploaded 1", "alpaca-library.json.gz"],
+      ["Uploaded 2", "alpaca-library.json.gz"],
+      ["Built-in", undefined],
+    ] as const) {
+      mixcrBlockIds.push(
+        await clonotype(ctx, {
+          sndBlockId,
+          datasetLabel: "Alpaca",
+          preset: ALPACA_PRESET,
+          species: "alpaca",
+          libraryAsset,
+          chains: ["IGHeavy"],
+          label,
+        }),
+      );
+    }
+    const outputs = await runLineageTrees(ctx, { from: mixcrBlockIds });
+    expectTrees(ctx, outputs);
+    expectClustered(ctx, outputs);
+  },
+);
+
 blockTest("imported AIRR", { timeout: TIMEOUT }, async ({ rawPrj, helpers, expect, ml }) => {
   const ctx = { rawPrj, helpers, expect, ml };
   const { blockId: sndBlockId } = await addSamples(ctx, { tsv: AIRR_BULK });

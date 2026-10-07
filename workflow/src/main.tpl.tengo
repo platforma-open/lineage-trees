@@ -142,7 +142,12 @@ wf.prepare(func(args) {
 		}, bundleKey("metadata", i))
 	}
 
-	return { columns: bundleBuilder.build() }
+	return {
+		columns: bundleBuilder.build(),
+		// Uploaded germline libraries; the clns only name theirs, so exportAirr needs the file.
+		// All of them: the id sits on the clns spec, known only in the body.
+		libraries: wf.query({ type: "Name", name: "pl7.app/vdj/library" })
+	}
 })
 
 wf.body(func(args) {
@@ -403,15 +408,34 @@ wf.body(func(args) {
 	// Null resource elsewhere, since the child declares every key.
 	clnsByDataset := {}
 	sampleMetadataByDataset := {}
+	librariesById := {}
+	for entry in args.libraries {
+		librariesById[entry.spec.domain["pl7.app/vdj/libraryId"]] = entry
+	}
+	libraryByDataset := {}
 	datasetParams := []
 	for ds in datasets {
 		idx := string(ds.index)
 		clnsByDataset[idx] = ds.alignmentSource == "mixcr" ? ds.clnsColumn.data : smart.createNullResource()
+		// No id: a built-in library MiXCR carries itself.
+		libraryId := ds.alignmentSource == "mixcr" && !is_undefined(ds.libraryId) ? ds.libraryId : ""
+		libraryFile := ""
+		libraryByDataset[idx] = smart.createNullResource()
+		if libraryId != "" {
+			library := librariesById[libraryId]
+			if is_undefined(library) {
+				ll.panic("Dataset \"" + ds.label + "\" was built with a germline library that is no longer in the project. Restore the block that made it, or clonotype again with another library.")
+			}
+			// The name MiXCR stored in the clns, so it finds the file in the working directory.
+			libraryFile = library.spec.annotations["pl7.app/vdj/libraryFormat"] == "repseqio.json.gz" ? "library.json.gz" : "library.json"
+			libraryByDataset[idx] = library.data
+		}
 		sampleMetadataByDataset[idx] = is_undefined(ds.sampleMetadataTable) ? smart.createNullResource() : ds.sampleMetadataTable
 		datasetParams = append(datasetParams, {
 			index: idx,
 			hasSampleMetadata: !is_undefined(ds.sampleMetadataTable),
 			fromMixcr: ds.alignmentSource == "mixcr",
+			libraryFile: libraryFile,
 			isAnchor: ds.isAnchor,
 			// Matched against the donor column's axis to find which datasets it reaches.
 			sampleAxis: {
@@ -429,6 +453,7 @@ wf.body(func(args) {
 		anchorsTable: merged.getFile("anchors.tsv"),
 		donorColumn: donorColumnInput,
 		clns: clnsByDataset,
+		libraries: libraryByDataset,
 		sampleMetadata: sampleMetadataByDataset,
 		params: {
 			hasDonorColumn: !is_undefined(args.donorColumn),

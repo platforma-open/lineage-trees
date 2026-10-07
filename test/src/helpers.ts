@@ -131,6 +131,8 @@ export async function clonotype(
     datasetLabel: string;
     preset: MixcrPreset;
     species?: string;
+    /** Germline library uploaded with the block, from `./assets`. */
+    libraryAsset?: string;
     chains: string[];
     label: string;
   },
@@ -156,6 +158,13 @@ export async function clonotype(
       input,
       preset,
       species: opts.species,
+      libraryFile:
+        opts.libraryAsset === undefined
+          ? undefined
+          : await helpers.getLocalFileHandle(`./assets/${opts.libraryAsset}`),
+      // An uploaded library takes its species from here, not from `species`.
+      customSpecies: opts.libraryAsset === undefined ? undefined : opts.species,
+      isLibraryFileGzipped: opts.libraryAsset?.endsWith(".gz"),
       chains: opts.chains,
       cloneClusteringMode: "default",
       runMode: "full",

@@ -150,6 +150,7 @@ self.body(func(inputs) {
 			sample := json.decode(key)[0]
 			allClns = append(allClns, {
 				idx: idx,
+				libraryFile: ds.libraryFile,
 				sample: prefixed(idx, sample),
 				// One directory level only: the working directory filler cannot nest.
 				name: "ds" + idx + "__" + sample,
@@ -189,7 +190,7 @@ self.body(func(inputs) {
 			if !inGroup(i, entry.sample) {
 				continue
 			}
-			airr := exec.builder().
+			airrCmd := exec.builder().
 				software(mixcrSw).
 				secret("MI_LICENSE", "MI_LICENSE").
 				mem("4GiB").
@@ -198,8 +199,12 @@ self.body(func(inputs) {
 				arg("exportAirr").
 				arg("input.clns").arg("airr.tsv").
 				saveFile("airr.tsv").
-				printErrStreamToStdout().
-				run()
+				printErrStreamToStdout()
+			// MiXCR looks the library up by the name stored in the clns.
+			if entry.libraryFile != "" {
+				airrCmd.addFile(entry.libraryFile, inputs.libraries[entry.idx])
+			}
+			airr := airrCmd.run()
 			airrFiles[entry.name + ".tsv"] = airr.getFile("airr.tsv")
 		}
 
