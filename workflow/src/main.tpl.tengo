@@ -7,6 +7,7 @@ assets := import("@platforma-sdk/workflow-tengo:assets")
 exec := import("@platforma-sdk/workflow-tengo:exec")
 f := exec.formula
 text := import("text")
+json := import("json")
 render := import("@platforma-sdk/workflow-tengo:render")
 smart := import("@platforma-sdk/workflow-tengo:smart")
 pframes := import("@platforma-sdk/workflow-tengo:pframes")
@@ -1429,6 +1430,44 @@ wf.body(func(args) {
 	maps.forEach(germlineMutations, add(exportsBuilder))
 	maps.forEach(anchorDistances, add(exportsBuilder))
 //	maps.forEach(anchorLinks, add(exportsBuilder))
+
+	// Each basket as a subset of each dataset it has clonotypes in, which lead selection offers as a filter.
+	// Built from args alone, so a basket edit reruns none of the stages.
+	for basket in is_undefined(args.baskets) ? [] : args.baskets {
+		for ds in datasets {
+			keys := basket.clonotypes[ds.key]
+			if is_undefined(keys) {
+				continue
+			}
+			rows := {}
+			for key in keys {
+				rows[json.encode([key])] = 1
+			}
+			exportsBuilder.add("basket." + basket.id + "." + ds.key,
+				// Pickers name a filter from its trace, not its label.
+				pSpec.makeTrace(ds.abundanceColumn.spec, traceStep, {
+					type: "milaboratories.lineage-trees.basket",
+					importance: 100,
+					label: basket.name
+				}).inject({
+					kind: "PColumn",
+					name: "pl7.app/clustering/basket",
+					valueType: "Int",
+					domain: {
+						"pl7.app/clustering/blockId": blockId,
+						"pl7.app/clustering/basketId": basket.id
+					},
+					axesSpec: [ds.clonotypeAxisSpec],
+					annotations: {
+						"pl7.app/label": basket.name,
+						"pl7.app/isSubset": "true",
+						"pl7.app/table/visibility": "hidden"
+					}
+				}),
+				smart.createValueResource({ Name: "PColumnData/Json", Version: "1" },
+					json.encode({ keyLength: 1, data: rows })))
+		}
+	}
 
 	datasetRuns := []
 	for ds in datasets {

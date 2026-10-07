@@ -1,6 +1,6 @@
 import type { BasketNode } from "@platforma-open/milaboratories.lineage-trees.model";
 import type { PFrameHandle, PlSelectionModel, PObjectId } from "@platforma-sdk/model";
-import { readLineageColumns } from "./lineageColumns";
+import { readLineageColumns, readLineageLinks } from "./lineageColumns";
 import type { TreeNodeColumns } from "./resolvePath";
 
 /** One entry per node and run: the same node added twice is kept once. */
@@ -50,6 +50,20 @@ export async function snapshotNodes(
   const read = await readLineageColumns(frame, columns, lineageId, wanted);
   const valueOf = (id: PObjectId | undefined, nodeId: string) =>
     id === undefined ? undefined : read.get(id)?.get(nodeId);
+  // Clonotype keys are what the export carries; they outlive a rerun, the node ids do not.
+  const links = await Promise.all(
+    columns.clonotypeLinks.map(async (link) => ({
+      datasetKey: link.datasetKey,
+      byNode: await readLineageLinks(frame, columns, lineageId, link),
+    })),
+  );
+  const clonotypesOf = (nodeId: string) =>
+    Object.fromEntries(
+      links.flatMap(({ datasetKey, byNode }) => {
+        const keys = byNode.get(nodeId);
+        return keys ? [[datasetKey, keys]] : [];
+      }),
+    );
   return nodeIds.map((nodeId) => {
     return {
       lineageId,
@@ -60,6 +74,7 @@ export async function snapshotNodes(
       nodeLabel: valueOf(columns.labelId, nodeId) ?? `Inferred node ${nodeId}`,
       heavySequence: valueOf(columns.heavySequenceId, nodeId),
       lightSequence: valueOf(columns.lightSequenceId, nodeId),
+      clonotypes: clonotypesOf(nodeId),
     };
   });
 }

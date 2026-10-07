@@ -120,7 +120,7 @@ export type BlockData = {
   }[];
   /** UI-only, never projected. */
   expansionGraphState: GraphMakerState;
-  /** Named sets of collected nodes, one section each. UI-only, never projected. Absent on older projects. */
+  /** Named sets of collected nodes, one section each. Their clonotypes are projected as `BlockArgs.baskets`. Absent on older projects. */
   baskets: NodeBasket[];
   /** Subtitle the user typed; empty or absent falls back to `defaultSubtitle`. Absent on older projects. */
   customBlockLabel?: string;
@@ -135,6 +135,8 @@ export type BasketNode = {
   nodeLabel: string;
   heavySequence?: string;
   lightSequence?: string;
+  /** Clonotype keys by dataset run id; empty for an inferred node. Absent on entries added before baskets were exported. */
+  clonotypes?: Record<string, string[]>;
 };
 
 export type NodeBasket = {
@@ -199,7 +201,37 @@ export type BlockArgs = {
   igPhyMLScope: IgPhyMLScope;
   /** Typed subtitle; names the clustering downstream in place of the computed label. Absent when blank. */
   customBlockLabel?: string;
+  /** Baskets with clonotypes, sorted by id, keys sorted per dataset run id. Absent when none. */
+  baskets?: BasketArg[];
 };
+
+/** A basket as exported: one subset column per dataset it has clonotypes in. */
+export type BasketArg = { id: string; name: string; clonotypes: Record<string, string[]> };
+
+/** Sorted throughout, so reordering baskets or nodes does not stale the block. */
+export function basketArgs(baskets: NodeBasket[]): BasketArg[] | undefined {
+  const out = baskets
+    .map((basket) => {
+      const byDataset = new Map<string, Set<string>>();
+      for (const node of basket.nodes) {
+        for (const [dataset, keys] of Object.entries(node.clonotypes ?? {})) {
+          const set = byDataset.get(dataset) ?? new Set<string>();
+          keys.forEach((key) => set.add(key));
+          byDataset.set(dataset, set);
+        }
+      }
+      const clonotypes = Object.fromEntries(
+        [...byDataset]
+          .filter(([, keys]) => keys.size > 0)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([dataset, keys]) => [dataset, [...keys].sort()]),
+      );
+      return { id: basket.id, name: basket.name, clonotypes };
+    })
+    .filter((basket) => Object.keys(basket.clonotypes).length > 0)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return out.length > 0 ? out : undefined;
+}
 
 /** Which shape of clonotyping output a dataset is. */
 export type Modality = "bulk-heavy" | "paired-sc";
@@ -545,6 +577,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
           : DEFAULT_SENSITIVITY,
       // Undefined when blank, so projects without a subtitle do not stale.
       customBlockLabel: data.customBlockLabel?.trim() || undefined,
+      // Undefined without exportable baskets, for the same reason.
+      baskets: basketArgs(data.baskets ?? []),
     };
   })
   // Inverse of `init`, so an exported template round-trips.
@@ -923,6 +957,14 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       // What a basket copies from a node when it is added.
       heavySequenceId: heavySequence?.id,
       lightSequenceId: lightSequence?.id,
+      // Node-to-clonotype links, one per dataset, keyed by the run id the workflow exports under.
+      clonotypeLinks: columns
+        .filter((column) => column.spec.name === "pl7.app/dendrogram/nodeClonotype")
+        .map((column) => ({
+          id: column.id,
+          datasetKey: column.spec.axesSpec[0].domain?.["pl7.app/vdj/clonotypingRunId"] ?? "",
+          clonotypeAxis: column.spec.axesSpec[0].name,
+        })),
     };
   })
 

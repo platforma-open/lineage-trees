@@ -42,6 +42,17 @@ const inThisRun = computed(() =>
     : (basket.value?.nodes ?? []).filter((node) => isCurrent(node, runKey.value)).length,
 );
 
+// Only clonotypes are exported: inferred nodes have none, and entries from before the export stored none.
+const inferred = computed(
+  () =>
+    (basket.value?.nodes ?? []).filter(
+      (node) => node.clonotypes !== undefined && Object.keys(node.clonotypes).length === 0,
+    ).length,
+);
+const withoutKeys = computed(
+  () => (basket.value?.nodes ?? []).filter((node) => node.clonotypes === undefined).length,
+);
+
 const tableStatus = computed(() => keyedStatus(app.model.outputs.basketTables, basket.value?.id));
 
 const settings = usePlDataTableSettingsV2({
@@ -110,6 +121,18 @@ const earlierColumns = computed<ColDef<BasketNode>[]>(() => [
       <div v-if="basket.nodes.length === 0">
         This basket is empty. Add nodes from a tree's table or from a mutational path.
       </div>
+      <PlAlert v-else type="info">
+        Once the block runs, downstream blocks such as lead selection can filter each dataset to
+        this basket's clonotypes.
+        <template v-if="inferred > 0">
+          {{ inferred }} inferred {{ inferred === 1 ? "node has" : "nodes have" }} no clonotype and
+          {{ inferred === 1 ? "is" : "are" }} not exported.
+        </template>
+        <template v-if="withoutKeys > 0">
+          {{ withoutKeys }} {{ withoutKeys === 1 ? "node was" : "nodes were" }} added before baskets
+          were exported and {{ withoutKeys === 1 ? "is" : "are" }} not exported until added again.
+        </template>
+      </PlAlert>
       <PlAgDataTableV2
         v-if="inThisRun > 0"
         v-model="basket.tableState"
