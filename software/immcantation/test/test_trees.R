@@ -33,9 +33,11 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
     return(list(ok = FALSE, log = paste(align_log, collapse = "\n"), dir = outdir))
   }
   marks <- file.path(dir, "annotations.tsv")
+  abundance <- file.path(dir, "abundance.tsv")
   argv <- c(trees_R, "--stage", "trees", common,
             if (file.exists(marks)) c("--annotations", marks),
             "--aligned", aligned,
+            if (file.exists(abundance)) c("--abundance", abundance),
             "--clones", file.path(dir, "clones.tsv"),
             # IgPhyML is chosen by scope; trees.R has no --builder.
             if (builder == "igphyml") c("--igphyml-scope", "all"),
@@ -474,6 +476,9 @@ if (tb$ok) {
     "above the floor" = any(counts >= AA_CDIST_MIN_SEQUENCES) && nrow(tb$cdist) > 0,
     "scores differ" = length(unique(v)) > 1))
   check_aa_cdist(tb, "table")
+  heavy_voter <- readLines(file.path(here, "heavy-voter.txt"))
+  ok("table: the consensus follows abundance, so the dominant member scores 0",
+     identical(tb$cdist$aa_cdist[tb$cdist$sequence_id == heavy_voter], "0"))
   g <- suppressWarnings(as.integer(tb$germline$germline_mutation_count))
   ok("table: germline mutations, one non-negative count per aligned clonotype, some mutated",
      nrow(tb$germline) > 0 && !any(duplicated(tb$germline$sequence_id)) &&

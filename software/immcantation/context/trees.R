@@ -34,6 +34,8 @@ builders_path <- opt("--out-builders", required = FALSE)
 cdist_path <- opt("--out-aa-cdist", required = FALSE)
 germline_mutations_path <- opt("--out-germline-mutations", required = FALSE)
 support_path <- opt("--out-consensus", required = FALSE)
+# sequence_id, abundance (summed over the donor's samples): weighs aa-cdist's consensus votes.
+abundance_path <- opt("--abundance", required = FALSE)
 # Our wrapper, not raxml-ng: FastTree drafts the topology, as ML search fails past ~1,000 tips.
 # The image sets these; natively the programs are on PATH.
 script_dir <- dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])))
@@ -686,6 +688,7 @@ if (!is.null(germline_mutations_path)) {
 
 # aa-cdist: distance to the lineage's amino acid consensus (Ralph & Matsen 2020, PLoS
 # Comput Biol 16(11):e1008391). Needs no tree, so uses every placed sequence. Heavy only.
+# Votes weighted by abundance, as partis weighs them by multiplicity.
 
 # Below this the consensus is unreliable (two members score zero). Same floor as partis.
 AA_CDIST_MIN_SEQUENCES <- 10
@@ -736,12 +739,12 @@ translate_all <- function(nt) {
   lapply(seq_along(nt), function(i) m[i, seq_len(n[i])])
 }
 
-# One vote per sequence; gaps and X do not vote, and a tie gives X, as in the paper.
-aa_consensus <- function(m) {
+# Each sequence votes its weight; gaps and X do not vote, and a tie gives X, as in the paper.
+aa_consensus <- function(m, w = rep(1, nrow(m))) {
   residues <- setdiff(unique(as.vector(m)), c(GAP_AA, AMBIGUOUS_AA))
   if (!length(residues)) return(rep(AMBIGUOUS_AA, ncol(m)))
   # One row per residue, one column per position, holding the votes cast.
-  counts <- vapply(residues, function(r) colSums(m == r), numeric(ncol(m)))
+  counts <- vapply(residues, function(r) colSums((m == r) * w), numeric(ncol(m)))
   counts <- matrix(counts, nrow = ncol(m), dimnames = list(NULL, residues))
   best <- apply(counts, 1, max)
   winners <- rowSums(counts == best)
@@ -764,8 +767,8 @@ progress("Amino acid consensus distance")
 heavy_seqs <- resolved[resolved$locus == HEAVY,
                        c("sequence_id", "lineage_id", "sequence_alignment", "frame_left")]
 heavy_seqs <- heavy_seqs[!duplicated(heavy_seqs$sequence_id), ]
-# One vote per distinct heavy sequence in a lineage, whatever its light chain or dataset,
-# as the paper does not weight by count.
+# One voter per distinct heavy sequence in a lineage, whatever its light chain or dataset,
+# weighted by its clonotypes' summed abundance. Without abundance every voter weighs 1.
 heavy_seqs$heavy_key <- paste(heavy_seqs$lineage_id, heavy_seqs$frame_left, heavy_seqs$sequence_alignment)
 voters <- heavy_seqs[!duplicated(heavy_seqs$heavy_key), ]
 
@@ -784,6 +787,14 @@ members_by_group <- split(heavy_seqs$sequence_id, heavy_seqs$heavy_key)
 voter_seq <- voters$sequence_alignment
 voter_frame <- as.integer(voters$frame_left)
 voter_group <- voters$heavy_key
+voter_weight <- if (is.null(abundance_path)) rep(1, nrow(voters)) else {
+  ab <- read_tsv(abundance_path)
+  per_clonotype <- as.numeric(ab$abundance)[match(heavy_seqs$sequence_id, ab$sequence_id)]
+  per_clonotype[is.na(per_clonotype)] <- 0
+  w <- tapply(per_clonotype, heavy_seqs$heavy_key, sum)
+  rm(ab)
+  as.vector(w[voter_group])
+}
 
 # Matched once: indexing a large named list by name rehashes on every call.
 member_of <- match(voter_group, names(members_by_group))
@@ -810,7 +821,7 @@ for (j in seq_along(scored_k)) {
   for (i in seq_along(aa)) {
     if (length(aa[[i]])) m[i, lead[i] + seq_along(aa[[i]])] <- aa[[i]]
   }
-  cons <- aa_consensus(m)
+  cons <- aa_consensus(m, voter_weight[rows])
   scored <- aa_distances(m, cons)
   members <- members_by_group[member_of[rows]]
   cdist_parts[[j]] <- data.frame(

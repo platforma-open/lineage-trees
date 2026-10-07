@@ -5,7 +5,8 @@ Stages, in workflow order:
 
   merge    per-dataset clonotype and abundance tables -> one of each.
            Ids get the dataset's position as a prefix, so they cannot collide.
-  split    clonotypes + abundance + donors -> one clonotype table per donor.
+  split    clonotypes + abundance + donors -> per donor, donor-<i>.tsv (clonotypes) and
+           abundance-<i>.tsv (sequence_id, abundance summed over the donor's samples).
            A lineage never spans donors; abundance says whose a clonotype is.
   cluster  clonotypes (sequence_id, v_call, j_call, junction)
            -> --out-clones (sequence_id, clone_id).
@@ -293,24 +294,27 @@ def split(args: argparse.Namespace) -> None:
     clonotypes = pd.read_csv(args.clonotypes, sep="\t", dtype=str, keep_default_na=False)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    def write(index: int, frame: pd.DataFrame) -> None:
+    abundance = pd.read_csv(args.abundance, sep="\t", dtype={"sample_id": str, "sequence_id": str},
+                            keep_default_na=False)
+    abundance["abundance"] = pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0)
+    abundance = abundance[abundance["abundance"] > 0]
+
+    # Abundance summed over the donor's samples: aa-cdist weighs each consensus vote by it.
+    def write(index: int, frame: pd.DataFrame, counts: pd.DataFrame) -> None:
         frame.to_csv(args.out_dir / f"donor-{index}.tsv", sep="\t", index=False)
+        counts.groupby("sequence_id", as_index=False)["abundance"].sum().to_csv(
+            args.out_dir / f"abundance-{index}.tsv", sep="\t", index=False)
 
     # No donor column: everything is one donor.
     if not args.donor:
-        write(0, clonotypes)
+        write(0, clonotypes, abundance)
         print(f"single donor: {len(clonotypes)} clonotypes", file=sys.stderr)
         return
 
-    abundance = pd.read_csv(args.abundance, sep="\t", dtype={"sample_id": str, "sequence_id": str},
-                            keep_default_na=False)
-    abundance = abundance[pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0) > 0]
     donors = pd.read_csv(args.donors, sep="\t", dtype=str, keep_default_na=False)
+    abundance = abundance.merge(donors, on="sample_id", how="inner")
 
-    seen = (
-        abundance.merge(donors, on="sample_id", how="inner")[["donor", "sequence_id"]]
-        .drop_duplicates()
-    )
+    seen = abundance[["donor", "sequence_id"]].drop_duplicates()
     per_donor = seen.groupby("sequence_id")["donor"].nunique()
     shared = int((per_donor > 1).sum())
     placed = set(seen["sequence_id"])
@@ -319,7 +323,7 @@ def split(args: argparse.Namespace) -> None:
     for index, donor in enumerate(args.donor):
         ids = set(seen.loc[seen["donor"] == donor, "sequence_id"])
         subset = clonotypes[clonotypes["sequence_id"].isin(ids)]
-        write(index, subset)
+        write(index, subset, abundance[abundance["donor"] == donor])
         print(f"donor {donor!r}: {len(subset)} clonotypes", file=sys.stderr)
 
     if shared:
@@ -1097,7 +1101,7 @@ def main() -> None:
 
     sp = stages.add_parser("split", help="one clonotype table per donor")
     sp.add_argument("--clonotypes", required=True, type=Path)
-    sp.add_argument("--abundance", type=Path)
+    sp.add_argument("--abundance", required=True, type=Path)
     sp.add_argument("--donors", type=Path, help="sample_id, donor")
     sp.add_argument("--out-dir", required=True, type=Path)
     sp.add_argument(

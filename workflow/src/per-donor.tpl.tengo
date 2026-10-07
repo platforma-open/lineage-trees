@@ -137,6 +137,7 @@ self.body(func(inputs) {
 	}
 	for i := 0; i < groupCount; i++ {
 		splitCmd.saveFile("split/donor-" + string(i) + ".tsv")
+		splitCmd.saveFile("split/abundance-" + string(i) + ".tsv")
 	}
 	split := splitCmd.saveStdoutContent().printErrStreamToStdout().run()
 
@@ -234,6 +235,7 @@ self.body(func(inputs) {
 			clonotypes: prep.clonotypes,
 			clones: cluster.clones,
 			aligned: prep.aligned,
+			abundance: split.getFile("split/abundance-" + string(i) + ".tsv"),
 			anchors: inputs.anchorsTable,
 			params: treeParams
 		}))

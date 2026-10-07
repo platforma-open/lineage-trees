@@ -47,11 +47,13 @@ self.body(func(inputs) {
 		addFile("clones.tsv", inputs.clones).
 		addFile("aligned.tsv", inputs.aligned, { tag: "aligned" }).
 		addFile("annotations.tsv", inputs.anchors).
+		addFile("abundance.tsv", inputs.abundance).
 		arg("--stage").arg("trees").
 		arg("--annotations").arg("annotations.tsv").
 		arg("--clonotypes").arg("clonotypes.tsv").
 		arg("--clones").arg("clones.tsv").
 		arg("--aligned").arg("aligned.tsv").
+		arg("--abundance").arg("abundance.tsv").
 		arg("--igphyml-scope").arg(params.igPhyMLScope).
 		arg("--threads").arg(string(treeCPUs)).
 		arg("--out-log").arg("trees.log").

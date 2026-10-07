@@ -171,6 +171,12 @@ write_scenario(file.path(out_root, "table"), table_db, light, character(),
                with_light_columns = FALSE, alignments = "table")
 note("table", "duplicated.txt", key(c(deep_source$cell_id[1:2], dup$cell_id)))
 note("table", "anchor.txt", key(dup$cell_id[1]))
+# One heavily mutated member outweighs the rest of its lineage, so the weighted consensus is its sequence.
+heavy_voter <- key(extra$cell_id[8])
+write.table(data.frame(sequence_id = key(table_db$cell_id),
+                       abundance = ifelse(key(table_db$cell_id) == heavy_voter, 1000, 1)),
+            file.path(out_root, "table", "abundance.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
+note("table", "heavy-voter.txt", heavy_voter)
 
 # --- twins ----------------------------------------------------------------
 # The deep clone plus twins of three members: the same heavy chain, a light chain one FR1

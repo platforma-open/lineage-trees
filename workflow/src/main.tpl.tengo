@@ -1297,7 +1297,7 @@ wf.body(func(args) {
 					domain: { "pl7.app/clustering/blockId": blockId },
 					annotations: {
 						"pl7.app/label": "Heavy AA consensus distance",
-						"pl7.app/description": "Amino acid positions where the clonotype's heavy chain differs from its lineage's consensus; lower is better. Blank for lineages with fewer than 10 distinct heavy sequences, where the consensus is unreliable.",
+						"pl7.app/description": "Amino acid positions where the clonotype's heavy chain differs from its lineage's consensus, each sequence voting by its abundance; lower is better. Blank for lineages with fewer than 10 distinct heavy sequences, where the consensus is unreliable.",
 						"pl7.app/isScore": "true",
 						"pl7.app/score/rankingOrder": "increasing",
 						"pl7.app/min": "0",
