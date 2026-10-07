@@ -5,8 +5,7 @@ Stages, in workflow order:
 
   merge    per-dataset clonotype and abundance tables -> one of each.
            Ids get the dataset's position as a prefix, so they cannot collide.
-  split    clonotypes + abundance + donors -> per donor, donor-<i>.tsv (clonotypes) and
-           abundance-<i>.tsv (sequence_id, abundance summed over the donor's samples).
+  split    clonotypes + abundance + donors -> one clonotype table per donor.
            A lineage never spans donors; abundance says whose a clonotype is.
   cluster  clonotypes (sequence_id, v_call, j_call, junction)
            -> --out-clones (sequence_id, clone_id).
@@ -25,7 +24,6 @@ Stages, in workflow order:
            and per dataset under --per-dataset-dir, ids unprefixed:
              lineages-<i>.tsv            sequence_id, lineage_id, link
              node-links-<i>.tsv          node-to-clonotype linker
-             aa-cdist-<i>.tsv            sequence_id, aa_cdist
              germline-mutations-<i>.tsv  sequence_id, germline_mutation_count
              expansion-<i>.tsv           sample_id, lineage_id, size_rank, abundance_percent
              member-counts-<i>.tsv       lineage_id, member_count
@@ -294,23 +292,18 @@ def split(args: argparse.Namespace) -> None:
     clonotypes = pd.read_csv(args.clonotypes, sep="\t", dtype=str, keep_default_na=False)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    abundance = pd.read_csv(args.abundance, sep="\t", dtype={"sample_id": str, "sequence_id": str},
-                            keep_default_na=False)
-    abundance["abundance"] = pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0)
-    abundance = abundance[abundance["abundance"] > 0]
-
-    # Abundance summed over the donor's samples: aa-cdist weighs each consensus vote by it.
-    def write(index: int, frame: pd.DataFrame, counts: pd.DataFrame) -> None:
+    def write(index: int, frame: pd.DataFrame) -> None:
         frame.to_csv(args.out_dir / f"donor-{index}.tsv", sep="\t", index=False)
-        counts.groupby("sequence_id", as_index=False)["abundance"].sum().to_csv(
-            args.out_dir / f"abundance-{index}.tsv", sep="\t", index=False)
 
     # No donor column: everything is one donor.
     if not args.donor:
-        write(0, clonotypes, abundance)
+        write(0, clonotypes)
         print(f"single donor: {len(clonotypes)} clonotypes", file=sys.stderr)
         return
 
+    abundance = pd.read_csv(args.abundance, sep="\t", dtype={"sample_id": str, "sequence_id": str},
+                            keep_default_na=False)
+    abundance = abundance[pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0) > 0]
     donors = pd.read_csv(args.donors, sep="\t", dtype=str, keep_default_na=False)
     abundance = abundance.merge(donors, on="sample_id", how="inner")
 
@@ -323,7 +316,7 @@ def split(args: argparse.Namespace) -> None:
     for index, donor in enumerate(args.donor):
         ids = set(seen.loc[seen["donor"] == donor, "sequence_id"])
         subset = clonotypes[clonotypes["sequence_id"].isin(ids)]
-        write(index, subset, abundance[abundance["donor"] == donor])
+        write(index, subset)
         print(f"donor {donor!r}: {len(subset)} clonotypes", file=sys.stderr)
 
     if shared:
@@ -545,9 +538,6 @@ NODE_LINK_COLUMNS = ["lineage_id", "node_id", "sequence_id", "link"]
 # As the tree step writes it; is_representative is read here, not exported.
 NODE_LINK_FILE_COLUMNS = [*NODE_LINK_COLUMNS, "is_representative"]
 BUILDER_COLUMNS = ["lineage_id", "tree_builder", "no_tree_reason"]
-AA_CDIST_COLUMNS = ["sequence_id", "lineage_id", "aa_cdist"]
-CONSENSUS_COLUMNS = ["lineage_id", "consensus_sequence_count"]
-AA_CDIST_OUT_COLUMNS = ["sequence_id", "aa_cdist"]
 GERMLINE_MUTATION_COLUMNS = ["sequence_id", "lineage_id", "germline_mutation_count"]
 GERMLINE_MUTATION_OUT_COLUMNS = ["sequence_id", "germline_mutation_count"]
 # Tooltip content per observed node. Always all written, blank if absent.
@@ -562,20 +552,16 @@ NODE_PROPERTY_COLUMNS = ["lineage_id", "node_id", *NODE_PROPERTY_SOURCE_COLUMNS]
 
 
 
-def _write_one_per_clonotype(frame: pd.DataFrame, support: pd.DataFrame, path: Path,
+def _write_one_per_clonotype(frame: pd.DataFrame, sizes: pd.Series, path: Path,
                              columns: list[str]) -> None:
     """Write one row per clonotype, no sample axis, so lead selection can rank by it.
 
-    A clonotype in two donors' lineages keeps the one with the larger consensus.
+    A clonotype in two donors' lineages keeps the one from the larger lineage.
     """
     if frame.empty:
         pd.DataFrame(columns=columns).to_csv(path, sep="\t", index=False)
         return
-    counts = (
-        support.set_index("lineage_id")["consensus_sequence_count"].astype(int)
-        if not support.empty else pd.Series(dtype=int)
-    )
-    ranked = frame.assign(_support=frame["lineage_id"].map(counts).fillna(0).astype(int))
+    ranked = frame.assign(_support=frame["lineage_id"].map(sizes).fillna(0).astype(int))
     ranked = ranked.sort_values(["sequence_id", "_support", "lineage_id"],
                                 ascending=[True, False, True])
     deduped = ranked.drop_duplicates("sequence_id", keep="first")
@@ -715,8 +701,6 @@ def _write_per_dataset(
     args: argparse.Namespace,
     lineages: pd.DataFrame,
     links: pd.DataFrame,
-    cdist: pd.DataFrame,
-    support: pd.DataFrame,
     expansion: pd.DataFrame,
     anchor_distances: pd.DataFrame,
     germline_mutations: pd.DataFrame,
@@ -724,6 +708,8 @@ def _write_per_dataset(
 ) -> None:
     """Write each dataset's rows with the id prefix removed; every file exists, even if empty."""
     args.per_dataset_dir.mkdir(parents=True, exist_ok=True)
+    sizes = (lineages.groupby("lineage_id").size() if not lineages.empty
+             else pd.Series(dtype=int))
 
     def slice_of(frame: pd.DataFrame, index: str, column: str) -> pd.DataFrame:
         if frame.empty:
@@ -745,9 +731,7 @@ def _write_per_dataset(
         }).to_csv(out / f"member-counts-{index}.tsv", sep="\t", index=False)
         slice_of(links, index, "sequence_id")[NODE_LINK_COLUMNS].to_csv(
             out / f"node-links-{index}.tsv", sep="\t", index=False)
-        _write_one_per_clonotype(slice_of(cdist, index, "sequence_id"), support,
-                                 out / f"aa-cdist-{index}.tsv", AA_CDIST_OUT_COLUMNS)
-        _write_one_per_clonotype(slice_of(germline_mutations, index, "sequence_id"), support,
+        _write_one_per_clonotype(slice_of(germline_mutations, index, "sequence_id"), sizes,
                                  out / f"germline-mutations-{index}.tsv",
                                  GERMLINE_MUTATION_OUT_COLUMNS)
         slice_of(expansion, index, "sample_id").to_csv(
@@ -897,7 +881,7 @@ def collect(args: argparse.Namespace) -> None:
     step("Reading tree outputs")
 
     lineage_parts, node_parts, link_parts, builder_parts = [], [], [], []
-    cdist_parts, support_parts, distance_parts, germline_parts = [], [], [], []
+    distance_parts, germline_parts = [], []
     for index, donor in enumerate(donors):
         lineages = _read_donor_file(args.lineages_dir, index, LINEAGE_FILE_COLUMNS)
         if donor is not None:
@@ -907,13 +891,9 @@ def collect(args: argparse.Namespace) -> None:
         link_parts.append(_read_donor_file(args.node_links_dir, index, NODE_LINK_FILE_COLUMNS))
         if args.builders_dir is not None:
             builder_parts.append(_read_donor_file(args.builders_dir, index, BUILDER_COLUMNS))
-        if args.aa_cdist_dir is not None:
-            cdist_parts.append(_read_donor_file(args.aa_cdist_dir, index, AA_CDIST_COLUMNS))
         if args.germline_mutations_dir is not None:
             germline_parts.append(_read_donor_file(args.germline_mutations_dir, index,
                                                    GERMLINE_MUTATION_COLUMNS))
-        if args.consensus_dir is not None:
-            support_parts.append(_read_donor_file(args.consensus_dir, index, CONSENSUS_COLUMNS))
         if args.anchor_distances_dir is not None:
             distance_parts.append(
                 _read_donor_file(args.anchor_distances_dir, index, ANCHOR_DISTANCE_COLUMNS))
@@ -961,14 +941,6 @@ def collect(args: argparse.Namespace) -> None:
     for column in ("tree_builder", "no_tree_reason"):
         lineage_stats[column] = lineage_stats["lineage_id"].map(
             by_lineage[column] if by_lineage is not None else pd.Series(dtype=str))
-
-    # Consensus size, which explains a blank aa-cdist.
-    support = _concat(support_parts, CONSENSUS_COLUMNS)
-    lineage_stats["consensus_sequence_count"] = (
-        lineage_stats["lineage_id"].map(
-            support.set_index("lineage_id")["consensus_sequence_count"] if not support.empty
-            else pd.Series(dtype=str))
-    )
 
     # TODO(badges): the pass / alert / ignore quality badge (spec Deliverable 1) goes here.
 
@@ -1027,11 +999,10 @@ def collect(args: argparse.Namespace) -> None:
     lineage_stats.to_csv(args.out_lineage_stats, sep="\t", index=False)
 
     step("Writing per-dataset tables")
-    cdist = _concat(cdist_parts, AA_CDIST_COLUMNS)
     anchor_labels = (
         clonotypes.drop_duplicates("sequence_id").set_index("sequence_id")["clone_label"]
         if "clone_label" in clonotypes.columns else pd.Series(dtype=str))
-    _write_per_dataset(args, lineages, links, cdist, support, expansion,
+    _write_per_dataset(args, lineages, links, expansion,
                        _concat(distance_parts, ANCHOR_DISTANCE_COLUMNS),
                        _concat(germline_parts, GERMLINE_MUTATION_COLUMNS), anchor_labels)
 
@@ -1101,7 +1072,7 @@ def main() -> None:
 
     sp = stages.add_parser("split", help="one clonotype table per donor")
     sp.add_argument("--clonotypes", required=True, type=Path)
-    sp.add_argument("--abundance", required=True, type=Path)
+    sp.add_argument("--abundance", type=Path)
     sp.add_argument("--donors", type=Path, help="sample_id, donor")
     sp.add_argument("--out-dir", required=True, type=Path)
     sp.add_argument(
@@ -1154,9 +1125,7 @@ def main() -> None:
     k.add_argument("--nodes-dir", required=True, type=Path)
     k.add_argument("--node-links-dir", required=True, type=Path)
     k.add_argument("--builders-dir", type=Path)
-    k.add_argument("--aa-cdist-dir", type=Path)
     k.add_argument("--germline-mutations-dir", type=Path)
-    k.add_argument("--consensus-dir", type=Path)
     k.add_argument("--anchor-distances-dir", type=Path)
     k.add_argument("--abundance", type=Path)
     k.add_argument("--donors", type=Path)

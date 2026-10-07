@@ -137,7 +137,6 @@ self.body(func(inputs) {
 	}
 	for i := 0; i < groupCount; i++ {
 		splitCmd.saveFile("split/donor-" + string(i) + ".tsv")
-		splitCmd.saveFile("split/abundance-" + string(i) + ".tsv")
 	}
 	split := splitCmd.saveStdoutContent().printErrStreamToStdout().run()
 
@@ -162,8 +161,8 @@ self.body(func(inputs) {
 	stageNames := {
 		prep: ["clonotypes", "aligned", "route", "alignLog", "allelesLog"],
 		cluster: ["clones", "method", "log"],
-		trees: ["lineages", "nodes", "nodeLinks", "builders", "aaCdist", "germlineMutations",
-			"consensus", "anchorDistances", "treesLog", "log"],
+		trees: ["lineages", "nodes", "nodeLinks", "builders", "germlineMutations",
+			"anchorDistances", "treesLog", "log"],
 		collect: ["nodes", "lineageStats", "nodeProperties", "nodeMetadata", "nodeAbundance",
 			"donorStats", "runId", "treesLog", "log", "perDataset"]
 	}
@@ -235,7 +234,6 @@ self.body(func(inputs) {
 			clonotypes: prep.clonotypes,
 			clones: cluster.clones,
 			aligned: prep.aligned,
-			abundance: split.getFile("split/abundance-" + string(i) + ".tsv"),
 			anchors: inputs.anchorsTable,
 			params: treeParams
 		}))
@@ -291,7 +289,7 @@ self.body(func(inputs) {
 	}
 	for ds in params.datasets {
 		idx := ds.index
-		for key in ["lineages", "nodeLinks", "aaCdist", "germlineMutations", "expansion", "memberCounts", "anchorDistances"] {
+		for key in ["lineages", "nodeLinks", "germlineMutations", "expansion", "memberCounts", "anchorDistances"] {
 			outputs[key + "-" + idx] = collected.perDataset.getFutureInputField(key + "-" + idx)
 		}
 		// Per dataset pair: an anchor id only means something with its issuing dataset.

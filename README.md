@@ -1,6 +1,6 @@
 # Lineage Trees
 
-Reconstruct BCR clonal lineages and rank candidates by where they sit in their lineage's maturation history. This Platforma block groups clonotypes into clonal lineages per donor, builds a phylogenetic tree for each lineage with its ancestral sequences reconstructed, and reports per-clonotype metrics you can rank on: how far a candidate has diverged from its lineage's consensus, and how close it sits along the tree to a known antibody.
+Reconstruct BCR clonal lineages and find the relatives of a known antibody. This Platforma block groups clonotypes into clonal lineages per donor, builds a phylogenetic tree for each lineage with its ancestral sequences reconstructed, and reports where each clonotype sits in that history: its mutations from the germline, and how far it lies along the tree from a characterised antibody.
 
 Open-source analysis block for Platforma, the biologics discovery platform by MiLaboratories. For the full no-code workflow, see [platforma.bio](https://platforma.bio/).
 
@@ -16,12 +16,10 @@ Clonotypes descended from one naive B cell form a clonal lineage whose members d
 
 **Anchors.** Any picked dataset can be marked as an anchor set: characterised antibodies whose relatives you are looking for. Every non-anchor member of a lineage holding one gets the amino acid mutations along the tree to the nearest anchor, per chain, with a link to that anchor's row.
 
-**Ranking.** The main ranking column, **Heavy AA consensus distance**, counts the amino acid positions where a clonotype's heavy chain differs from its lineage's consensus. It needs no tree, but it needs a consensus to trust: a lineage gets it only when at least 10 distinct heavy sequences vote on the consensus. Below that it is blank, since a lineage of one or two would score 0 and sort above every real candidate. The lineage table's **Consensus sequences** column shows each lineage's count.
-
 ## Inputs & outputs
 
 * **Input:** one or more IG clonotyping datasets, bulk heavy chain or paired single cell, from [MiXCR Clonotyping](https://github.com/platforma-open/mixcr-clonotyping) or [Import V(D)J Data](https://github.com/platforma-open/import-vdj-data), clustered together. Optionally a sample metadata column naming each sample's donor.
-* **Output:** per clonotype, its lineage, its Heavy AA consensus distance, its heavy chain mutations from the germline and, with anchors, its mutations to the nearest anchor. Per lineage, size, genes, representative CDR3, abundance, anchors held, the tree builder and, when several datasets were picked, members per dataset. Per node, the reconstructed heavy and (on paired data) light sequences, the mutations acquired on the branch reaching it, and its place in the tree: depth, terminal branch fraction and the size of its parent's clade. The ranking columns are available to downstream blocks.
+* **Output:** per clonotype, its lineage, its heavy chain mutations from the germline and, with anchors, its mutations to the nearest anchor. Per lineage, size, genes, representative CDR3, abundance, anchors held, the tree builder and, when several datasets were picked, members per dataset. Per node, the reconstructed heavy and (on paired data) light sequences, the mutations acquired on the branch reaching it, and its place in the tree: depth, terminal branch fraction and the size of its parent's clade. The ranking columns are available to downstream blocks.
 
 ## Specifications
 
@@ -32,7 +30,7 @@ Clonotypes descended from one naive B cell form a clonal lineage whose members d
 | Modalities | Bulk heavy chain and paired single cell, mixed in one run |
 | Tools | [HILARy](https://github.com/statbiophys/HILARy), [TIgGER](https://tigger.readthedocs.io/), [Dowser](https://dowser.readthedocs.io/), [FastTree](https://morgannprice.github.io/fasttree/), [raxml-ng](https://github.com/amkozlov/raxml-ng), optionally [IgPhyML](https://github.com/immcantation/igphyml) |
 | Alignments | MiXCR's own where a dataset carries a `clns`, otherwise the dataset's `sequence_alignment` and `germline_alignment`. Nothing is realigned |
-| Ranking columns | Heavy AA consensus distance (blank for lineages under 10 distinct heavy sequences), Heavy AA mutations to anchor, Light AA mutations to anchor on paired data (lower is better) |
+| Ranking columns | Heavy AA mutations to anchor, Light AA mutations to anchor on paired data (lower is better) |
 | Views | Donor overview with per-stage progress and logs, lineage table, lineage expansion plot, dendrogram and node table per lineage, mutational path, baskets, sequence search |
 
 ## Settings
@@ -52,12 +50,11 @@ Everything below Anchor datasets lives under **Advanced**.
 | Maximum tips per tree | unset | Subsamples larger lineages at random before building, always keeping anchors |
 | Minimum tips per tree | unset | Smaller lineages keep their membership and get no tree |
 
-A clonotype left out of a tree keeps its lineage and its Heavy AA consensus distance, and loses only the tree columns.
+A clonotype left out of a tree keeps its lineage and its germline mutation count, and loses only the tree columns.
 
 ## Use cases
 
 * **Find relatives of a known antibody:** mark the characterised set as an anchor dataset and rank by Heavy AA mutations to anchor.
-* **Rank by maturation:** select on the Heavy AA consensus distance.
 * **Read a maturation history:** follow the mutational path from the germline to a candidate, and collect nodes of interest into baskets.
 * **Join bulk and single-cell data:** cluster both for one donor into shared lineages, with light chains from the paired data.
 * **Feed lead selection:** supply lineages and ranking columns to [Lead Selection](https://github.com/platforma-open/antibody-tcr-lead-selection).
@@ -95,8 +92,6 @@ If you use this block in your research, please cite the tools your run relied on
 > **IgPhyML.** Hoehn, K. B., Vander Heiden, J. A., Zhou, J. Q., Lunter, G., Pybus, O. G., & Kleinstein, S. H. (2019). Repertoire-wide phylogenetic models of B cell molecular evolution reveal evolutionary signatures of aging and vaccination. *PNAS* **116**(45), 22664-22672. [doi:10.1073/pnas.1906020116](https://doi.org/10.1073/pnas.1906020116)
 
 > **TIgGER.** Gadala-Maria, D., Yaari, G., Uduman, M., & Kleinstein, S. H. (2015). Automated analysis of high-throughput B-cell sequencing data reveals a high frequency of novel immunoglobulin V gene segment alleles. *PNAS* **112**(8), E862-E870. [doi:10.1073/pnas.1417683112](https://doi.org/10.1073/pnas.1417683112)
-
-The Heavy AA consensus distance follows Ralph, D. K., & Matsen IV, F. A. (2020). Using B cell receptor lineage structures to predict affinity. *PLOS Computational Biology* **16**(11), e1008391. [doi:10.1371/journal.pcbi.1008391](https://doi.org/10.1371/journal.pcbi.1008391)
 
 ## Part of the Platforma ecosystem
 

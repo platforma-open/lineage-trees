@@ -1,10 +1,10 @@
 # Overview
 
-Groups B cell clonotypes into clonal lineages and builds a tree for each lineage, showing how it developed during an immune response and giving every clonotype values it can be ranked by. Members of a lineage descend from the same B cell and differ by the mutations they picked up along the way. The block works on antibody (IG) data, bulk heavy chain or paired single cell, from MiXCR Clonotyping or Import V(D)J Data, and can mix both in one run. Lineages never cross donors: a sample metadata column can name each sample's donor, otherwise all samples are treated as one donor.
+Groups B cell clonotypes into clonal lineages and builds a tree for each lineage, showing how it developed during an immune response and where each clonotype sits in that history. Members of a lineage descend from the same B cell and differ by the mutations they picked up along the way. The block works on antibody (IG) data, bulk heavy chain or paired single cell, from MiXCR Clonotyping or Import V(D)J Data, and can mix both in one run. Lineages never cross donors: a sample metadata column can name each sample's donor, otherwise all samples are treated as one donor.
 
 Clonotypes are grouped into lineages by their heavy chain with HILARy, using a fixed similarity threshold or its adaptive mode, and split by light chain where light chains are present. TIgGER first infers the donor's V gene alleles. Each lineage then gets a tree with its ancestral sequences reconstructed, built with FastTree and RAxML-NG through Dowser, or optionally with IgPhyML.
 
-The main ranking column, Heavy AA consensus distance, counts the amino acids in a clonotype's heavy chain that differ from its lineage's consensus, following Ralph and Matsen (2020); lower is better. It is given only for lineages with at least 10 distinct heavy sequences. Known antibodies can be added as anchors, and every other member of their lineage gets its distance to the nearest anchor. The ranking columns and lineage ids go to downstream blocks such as Lead Selection.
+Every clonotype gets its heavy chain mutation count from the germline. Known antibodies can be added as anchors, and every other member of their lineage gets its distance to the nearest anchor. The ranking columns and lineage ids go to downstream blocks such as Lead Selection.
 
 When using this block in your research, cite the publications for the tools your run relied on, listed below.
 
@@ -19,5 +19,3 @@ When using this block in your research, cite the publications for the tools your
 > Kozlov, A. M., Darriba, D., Flouri, T., Morel, B., & Stamatakis, A. (2019). RAxML-NG: a fast, scalable and user-friendly tool for maximum likelihood phylogenetic inference. _Bioinformatics_ **35**(21), 4453-4455. [https://doi.org/10.1093/bioinformatics/btz305](https://doi.org/10.1093/bioinformatics/btz305)
 
 > Hoehn, K. B., Vander Heiden, J. A., Zhou, J. Q., Lunter, G., Pybus, O. G., & Kleinstein, S. H. (2019). Repertoire-wide phylogenetic models of B cell molecular evolution reveal evolutionary signatures of aging and vaccination. _PNAS_ **116**(45), 22664-22672. [https://doi.org/10.1073/pnas.1906020116](https://doi.org/10.1073/pnas.1906020116)
-
-> Ralph, D. K., & Matsen IV, F. A. (2020). Using B cell receptor lineage structures to predict affinity. _PLOS Computational Biology_ **16**(11), e1008391. [https://doi.org/10.1371/journal.pcbi.1008391](https://doi.org/10.1371/journal.pcbi.1008391)

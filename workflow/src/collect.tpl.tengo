@@ -18,9 +18,7 @@ DIRS := {
 	nodes: "nodes",
 	nodeLinks: "node-links",
 	builders: "builders",
-	aaCdist: "aa-cdist",
 	germlineMutations: "germline-mutations",
-	consensus: "consensus",
 	anchorDistances: "anchor-distances"
 }
 
@@ -28,7 +26,6 @@ DIRS := {
 PER_DATASET := {
 	"lineages": "lineages",
 	"nodeLinks": "node-links",
-	"aaCdist": "aa-cdist",
 	"germlineMutations": "germline-mutations",
 	"expansion": "expansion",
 	"memberCounts": "member-counts",
@@ -63,9 +60,7 @@ self.body(func(inputs) {
 		arg("--nodes-dir").arg("nodes").
 		arg("--node-links-dir").arg("node-links").
 		arg("--builders-dir").arg("builders").
-		arg("--aa-cdist-dir").arg("aa-cdist").
 		arg("--germline-mutations-dir").arg("germline-mutations").
-		arg("--consensus-dir").arg("consensus").
 		arg("--anchor-distances-dir").arg("anchor-distances").
 		arg("--abundance").arg("abundance.tsv").
 		arg("--out-nodes").arg("nodes.tsv").

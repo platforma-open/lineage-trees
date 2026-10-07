@@ -31,11 +31,7 @@ lineages_path <- opt("--out-lineages", required = stage == "trees")
 nodes_path <- opt("--out-nodes", required = stage == "trees")
 links_path <- opt("--out-node-links", required = stage == "trees")
 builders_path <- opt("--out-builders", required = FALSE)
-cdist_path <- opt("--out-aa-cdist", required = FALSE)
 germline_mutations_path <- opt("--out-germline-mutations", required = FALSE)
-support_path <- opt("--out-consensus", required = FALSE)
-# sequence_id, abundance (summed over the donor's samples): weighs aa-cdist's consensus votes.
-abundance_path <- opt("--abundance", required = FALSE)
 # Our wrapper, not raxml-ng: FastTree drafts the topology, as ML search fails past ~1,000 tips.
 # The image sets these; natively the programs are on PATH.
 script_dir <- dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])))
@@ -201,15 +197,13 @@ finish_empty <- function(reason, membership = NULL) {
   write.table(empty(NODE_COLUMNS), nodes_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
   write.table(empty(c("lineage_id", "node_id", "sequence_id", "is_representative", "link")),
               links_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
-  # aa-cdist needs no tree, so it may already be written by the time we exit here.
+  # Germline mutations need no tree, so they may already be written by the time we exit here.
   write_absent <- function(path, cols) {
     if (!is.null(path) && !file.exists(path)) {
       write.table(empty(cols), path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
     }
   }
-  write_absent(cdist_path, c("sequence_id", "lineage_id", "aa_cdist"))
   write_absent(germline_mutations_path, GERMLINE_MUTATION_COLUMNS)
-  write_absent(support_path, c("lineage_id", "consensus_sequence_count"))
   write_absent(anchor_path, ANCHOR_COLUMNS)
   close_log()
   quit(status = 0)
@@ -686,12 +680,7 @@ if (!is.null(germline_mutations_path)) {
   cat(sprintf("germline mutations: counted for %d clonotypes\n", nrow(germline_mutations)))
 }
 
-# aa-cdist: distance to the lineage's amino acid consensus (Ralph & Matsen 2020, PLoS
-# Comput Biol 16(11):e1008391). Needs no tree, so uses every placed sequence. Heavy only.
-# Votes weighted by abundance, as partis weighs them by multiplicity.
-
-# Below this the consensus is unreliable (two members score zero). Same floor as partis.
-AA_CDIST_MIN_SEQUENCES <- 10
+# Amino acid translation, shared by the per-branch mutation steps below.
 
 GAP_AA <- c(".", "-")
 AMBIGUOUS_AA <- "X"
@@ -739,111 +728,10 @@ translate_all <- function(nt) {
   lapply(seq_along(nt), function(i) m[i, seq_len(n[i])])
 }
 
-# Each sequence votes its weight; gaps and X do not vote, and a tie gives X, as in the paper.
-aa_consensus <- function(m, w = rep(1, nrow(m))) {
-  residues <- setdiff(unique(as.vector(m)), c(GAP_AA, AMBIGUOUS_AA))
-  if (!length(residues)) return(rep(AMBIGUOUS_AA, ncol(m)))
-  # One row per residue, one column per position, holding the votes cast.
-  counts <- vapply(residues, function(r) colSums((m == r) * w), numeric(ncol(m)))
-  counts <- matrix(counts, nrow = ncol(m), dimnames = list(NULL, residues))
-  best <- apply(counts, 1, max)
-  winners <- rowSums(counts == best)
-  out <- residues[max.col(counts, ties.method = "first")]
-  out[best == 0 | winners > 1] <- AMBIGUOUS_AA
-  out
-}
-
-# Score a position only where both residues are readable. Whole lineage at once.
-aa_distances <- function(m, cons) {
-  unreadable <- c(GAP_AA, AMBIGUOUS_AA)
-  keep_col <- !cons %in% unreadable
-  if (!any(keep_col)) return(rep(0L, nrow(m)))
-  sub <- m[, keep_col, drop = FALSE]
-  ref <- rep(cons[keep_col], each = nrow(sub))
-  as.integer(rowSums(sub != ref & !(sub %in% unreadable)))
-}
-
-progress("Amino acid consensus distance")
-heavy_seqs <- resolved[resolved$locus == HEAVY,
-                       c("sequence_id", "lineage_id", "sequence_alignment", "frame_left")]
-heavy_seqs <- heavy_seqs[!duplicated(heavy_seqs$sequence_id), ]
-# One voter per distinct heavy sequence in a lineage, whatever its light chain or dataset,
-# weighted by its clonotypes' summed abundance. Without abundance every voter weighs 1.
-heavy_seqs$heavy_key <- paste(heavy_seqs$lineage_id, heavy_seqs$frame_left, heavy_seqs$sequence_alignment)
-voters <- heavy_seqs[!duplicated(heavy_seqs$heavy_key), ]
 
 # Row indices per lineage in first-appearance order: one pass instead of a scan per lineage.
 rows_by_lineage <- function(d) {
   split(seq_len(nrow(d)), factor(d$lineage_id, levels = unique(d$lineage_id)))
-}
-
-heavy_lineages <- rows_by_lineage(voters)
-# The floor counts voters, not clonotypes.
-support <- data.frame(lineage_id = as.character(names(heavy_lineages)),
-                      consensus_sequence_count = unname(lengths(heavy_lineages)),
-                      stringsAsFactors = FALSE)
-members_by_group <- split(heavy_seqs$sequence_id, heavy_seqs$heavy_key)
-# Plain vectors: slicing the data frame per lineage cost more than the work.
-voter_seq <- voters$sequence_alignment
-voter_frame <- as.integer(voters$frame_left)
-voter_group <- voters$heavy_key
-voter_weight <- if (is.null(abundance_path)) rep(1, nrow(voters)) else {
-  ab <- read_tsv(abundance_path)
-  per_clonotype <- as.numeric(ab$abundance)[match(heavy_seqs$sequence_id, ab$sequence_id)]
-  cat(sprintf("aa-cdist weights: abundance for %d of %d heavy clonotypes, total %g, largest %g\n",
-              sum(!is.na(per_clonotype)), length(per_clonotype),
-              sum(per_clonotype, na.rm = TRUE), max(c(0, per_clonotype), na.rm = TRUE)))
-  per_clonotype[is.na(per_clonotype)] <- 0
-  w <- tapply(per_clonotype, heavy_seqs$heavy_key, sum)
-  rm(ab)
-  as.vector(w[voter_group])
-}
-
-# Matched once: indexing a large named list by name rehashes on every call.
-member_of <- match(voter_group, names(members_by_group))
-scored_k <- which(lengths(heavy_lineages) >= AA_CDIST_MIN_SEQUENCES)
-TRANSLATE_BLOCK <- 100000L
-aa_of <- vector("list", nrow(voters))
-scored_rows <- as.integer(unlist(heavy_lineages[scored_k], use.names = FALSE))
-for (b in split(scored_rows, (seq_along(scored_rows) - 1L) %/% TRANSLATE_BLOCK)) {
-  aa_of[b] <- translate_all(voter_seq[b])
-}
-rm(scored_rows)
-
-cdist_parts <- vector("list", length(scored_k))
-for (j in seq_along(scored_k)) {
-  k <- scored_k[j]
-  lid <- names(heavy_lineages)[k]
-  rows <- heavy_lineages[[k]]
-  aa <- aa_of[rows]
-  # Align members on the junction: pad by the codons their 5' side is short.
-  frame <- voter_frame[rows]
-  lead <- (max(frame) - frame) %/% 3
-  width <- max(lengths(aa) + lead)
-  m <- matrix(GAP_AA[1], nrow = length(aa), ncol = width)
-  for (i in seq_along(aa)) {
-    if (length(aa[[i]])) m[i, lead[i] + seq_along(aa[[i]])] <- aa[[i]]
-  }
-  cons <- aa_consensus(m, voter_weight[rows])
-  scored <- aa_distances(m, cons)
-  members <- members_by_group[member_of[rows]]
-  cdist_parts[[j]] <- data.frame(
-    sequence_id = unlist(members, use.names = FALSE),
-    lineage_id = lid,
-    aa_cdist = rep(scored, lengths(members)),
-    stringsAsFactors = FALSE)
-}
-
-cdist <- if (length(cdist_parts)) as.data.frame(dplyr::bind_rows(cdist_parts)) else
-  data.frame(sequence_id = character(0), lineage_id = character(0), aa_cdist = integer(0))
-cat(sprintf("aa-cdist: %d of %d lineages reached %d distinct sequences, covering %d clonotypes\n",
-            length(cdist_parts), nrow(support), AA_CDIST_MIN_SEQUENCES, nrow(cdist)))
-
-if (!is.null(support_path)) {
-  write.table(support, support_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
-}
-if (!is.null(cdist_path)) {
-  write.table(cdist, cdist_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
 }
 
 # Per-lineage downsampling, off by default (FastTree+RAxML is near-linear in tips).

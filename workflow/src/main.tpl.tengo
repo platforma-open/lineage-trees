@@ -114,7 +114,7 @@ wf.prepare(func(args) {
 		}, bundleKey("vdjRegion", i))
 
 		// Upstream alignments (AIRR sequence_alignment / germline_alignment, gaps kept).
-		// Nucleotide only: the tree builders and aa-cdist read nucleotides.
+		// Nucleotide only: the tree builders read nucleotides.
 		for name in ["sequenceAlignment", "germlineAlignment"] {
 			bundleBuilder.addMulti({
 				axes: [{ anchor: anchor, idx: 1 }],
@@ -710,19 +710,6 @@ wf.body(func(args) {
 				}
 			}
 		}, {
-			column: "consensus_sequence_count",
-			allowNA: true,
-			spec: {
-				name: "pl7.app/clustering/consensusSequenceCount",
-				valueType: "Int",
-				annotations: {
-					"pl7.app/label": "Consensus sequences",
-					"pl7.app/description": "Number of member sequences the lineage's amino acid consensus was computed over; below 10 the members get no Heavy AA consensus distance.",
-					"pl7.app/table/visibility": "optional",
-					"pl7.app/table/orderPriority": "86000"
-				}
-			}
-		}, {
 			// Decides the unit of branch lengths. Blank where no tree was built.
 			column: "tree_builder",
 			allowNA: true,
@@ -1139,7 +1126,6 @@ wf.body(func(args) {
 	// import id carries the dataset key so frame keys stay unique. Ids are unprefixed.
 	lineageLinks := {}
 	nodeClonotypeLinks := {}
-	aaCdist := {}
 	germlineMutations := {}
 	expansion := {}
 	memberCounts := {}
@@ -1283,30 +1269,6 @@ wf.body(func(args) {
 			}]
 		}, { splitDataAndSpec: true })), func(key, value) { lineageLinks[key] = value })
 
-		// Distance from a clonotype's AA sequence to its lineage consensus. Anchors too, so their
-		// own values sit on their axis beside their properties, such as an IC50.
-		maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("aaCdist-" + idx), "tsv", {
-			axes: [{ column: "sequence_id", spec: ds.clonotypeAxisSpec }],
-			columns: [{
-				column: "aa_cdist",
-				id: "aaCdist." + ds.key,
-				spec: {
-					name: "pl7.app/vdj/aaCdist",
-					valueType: "Int",
-					// Separates two runs of this block over one clonotyping.
-					domain: { "pl7.app/clustering/blockId": blockId },
-					annotations: {
-						"pl7.app/label": "Heavy AA consensus distance",
-						"pl7.app/description": "Amino acid positions where the clonotype's heavy chain differs from its lineage's consensus, each sequence voting by its abundance; lower is better. Blank for lineages with fewer than 10 distinct heavy sequences, where the consensus is unreliable.",
-						"pl7.app/isScore": "true",
-						"pl7.app/score/rankingOrder": "increasing",
-						"pl7.app/min": "0",
-						"pl7.app/table/orderPriority": "86000"
-					}
-				}
-			}]
-		}, { splitDataAndSpec: true })), func(key, value) { aaCdist[key] = value })
-
 		// Heavy chain nucleotide differences from the germline, outside the junction.
 		maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("germlineMutations-" + idx), "tsv", {
 			axes: [{ column: "sequence_id", spec: ds.clonotypeAxisSpec }],
@@ -1441,7 +1403,6 @@ wf.body(func(args) {
 			addExport(key, value)
 		}
 	})
-	maps.forEach(aaCdist, add(exportsBuilder))
 	maps.forEach(germlineMutations, add(exportsBuilder))
 	maps.forEach(anchorDistances, add(exportsBuilder))
 //	maps.forEach(anchorLinks, add(exportsBuilder))

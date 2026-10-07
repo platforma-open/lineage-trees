@@ -128,10 +128,6 @@ def main(tmp: Path) -> None:
     ok("a clonotype seen in two donors goes to both", "0_both" in split[0] and "0_both" in split[1])
     ok("one seen in no sample with a donor goes to none", not any("0_zero" in s for s in split))
     ok("a donor with no samples gets an empty table", not split[2])
-    sums = [dict(zip(t["sequence_id"], t["abundance"].astype(float)))
-            for t in (read(tmp / "split" / f"abundance-{i}.tsv") for i in range(3))]
-    ok("abundance is summed per donor, over that donor's samples only",
-       sums[0].get("0_both") == 20 and sums[1].get("0_both") == 7 and not sums[2])
 
     print("== cluster ==")
     a, b = per_donor["A"], per_donor["B"]

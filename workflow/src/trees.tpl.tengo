@@ -16,15 +16,13 @@ FILES := {
 	nodes: "nodes.tsv",
 	nodeLinks: "node-links.tsv",
 	builders: "builders.tsv",
-	aaCdist: "aa-cdist.tsv",
 	germlineMutations: "germline-mutations.tsv",
-	consensus: "consensus.tsv",
 	anchorDistances: "anchor-distances.tsv",
 	treesLog: "trees.log"
 }
 
-self.defineOutputs("lineages", "nodes", "nodeLinks", "builders", "aaCdist", "germlineMutations",
-	"consensus", "anchorDistances", "treesLog", "log")
+self.defineOutputs("lineages", "nodes", "nodeLinks", "builders", "germlineMutations",
+	"anchorDistances", "treesLog", "log")
 
 self.body(func(inputs) {
 	params := inputs.params
@@ -48,13 +46,11 @@ self.body(func(inputs) {
 		addFile("clones.tsv", inputs.clones).
 		addFile("aligned.tsv", inputs.aligned, { tag: "aligned" }).
 		addFile("annotations.tsv", inputs.anchors).
-		addFile("abundance.tsv", inputs.abundance).
 		arg("--stage").arg("trees").
 		arg("--annotations").arg("annotations.tsv").
 		arg("--clonotypes").arg("clonotypes.tsv").
 		arg("--clones").arg("clones.tsv").
 		arg("--aligned").arg("aligned.tsv").
-		arg("--abundance").arg("abundance.tsv").
 		arg("--igphyml-scope").arg(params.igPhyMLScope).
 		arg("--threads").argExpr("{system.cpu}").
 		arg("--out-log").arg("trees.log").
@@ -62,9 +58,7 @@ self.body(func(inputs) {
 		arg("--out-nodes").arg("nodes.tsv").
 		arg("--out-node-links").arg("node-links.tsv").
 		arg("--out-builders").arg("builders.tsv").
-		arg("--out-aa-cdist").arg("aa-cdist.tsv").
 		arg("--out-germline-mutations").arg("germline-mutations.tsv").
-		arg("--out-consensus").arg("consensus.tsv").
 		arg("--out-anchor-distances").arg("anchor-distances.tsv").
 		saveStdoutStream().
 		printErrStreamToStdout()

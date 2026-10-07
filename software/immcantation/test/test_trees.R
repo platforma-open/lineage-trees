@@ -33,11 +33,9 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
     return(list(ok = FALSE, log = paste(align_log, collapse = "\n"), dir = outdir))
   }
   marks <- file.path(dir, "annotations.tsv")
-  abundance <- file.path(dir, "abundance.tsv")
   argv <- c(trees_R, "--stage", "trees", common,
             if (file.exists(marks)) c("--annotations", marks),
             "--aligned", aligned,
-            if (file.exists(abundance)) c("--abundance", abundance),
             "--clones", file.path(dir, "clones.tsv"),
             # IgPhyML is chosen by scope; trees.R has no --builder.
             if (builder == "igphyml") c("--igphyml-scope", "all"),
@@ -46,9 +44,7 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
             "--out-nodes", file.path(outdir, "nodes.tsv"),
             "--out-node-links", file.path(outdir, "node-links.tsv"),
             "--out-builders", file.path(outdir, "builders.tsv"),
-            "--out-aa-cdist", file.path(outdir, "aa-cdist.tsv"),
             "--out-germline-mutations", file.path(outdir, "germline-mutations.tsv"),
-            "--out-consensus", file.path(outdir, "consensus.tsv"),
             "--out-anchor-distances", file.path(outdir, "anchor-distances.tsv"))
   log <- system2("Rscript", argv, stdout = TRUE, stderr = TRUE)
   status <- attr(log, "status")
@@ -58,9 +54,7 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
        nodes = if (is.null(status)) read_tsv(file.path(outdir, "nodes.tsv")),
        links = if (is.null(status)) read_tsv(file.path(outdir, "node-links.tsv")),
        builders = if (is.null(status)) read_tsv(file.path(outdir, "builders.tsv")),
-       cdist = if (is.null(status)) read_tsv(file.path(outdir, "aa-cdist.tsv")),
        germline = if (is.null(status)) read_tsv(file.path(outdir, "germline-mutations.tsv")),
-       consensus = if (is.null(status)) read_tsv(file.path(outdir, "consensus.tsv")),
        anchors = if (is.null(status)) read_tsv(file.path(outdir, "anchor-distances.tsv")))
 }
 
@@ -115,33 +109,6 @@ ok_all <- function(what, parts) {
 crashed <- function(r, what) {
   ok_all(what, list(runs = FALSE))
   tail_of(r)
-}
-
-# aa-cdist comes from the consensus, not the tree, so it is checked against lineage size.
-AA_CDIST_MIN_SEQUENCES <- 10
-check_aa_cdist <- function(r, label) {
-  counts <- setNames(as.integer(r$consensus$consensus_sequence_count),
-                     r$consensus$lineage_id)
-  scored <- unique(r$lineages$lineage_id[r$lineages$sequence_id %in% r$cdist$sequence_id])
-  above <- names(counts)[counts >= AA_CDIST_MIN_SEQUENCES]
-  parts <- list(
-    # Unscored lineages get a count too.
-    "every lineage carries a consensus count" =
-      setequal(names(counts), unique(r$lineages$lineage_id[r$lineages$sequence_id %in%
-                                                           r$links$sequence_id])) ||
-        length(setdiff(names(counts), unique(r$lineages$lineage_id))) == 0,
-    "scored exactly at or above the floor" = setequal(scored, above),
-    "no sequence scored twice" = !any(duplicated(r$cdist$sequence_id)),
-    "scores are non-negative integers" =
-      nrow(r$cdist) == 0 || all(!is.na(suppressWarnings(as.integer(r$cdist$aa_cdist))) &
-                                as.integer(r$cdist$aa_cdist) >= 0))
-  # The consensus is the centre, so some member must sit near it.
-  if (nrow(r$cdist)) {
-    per <- split(as.integer(r$cdist$aa_cdist),
-                 r$lineages$lineage_id[match(r$cdist$sequence_id, r$lineages$sequence_id)])
-    parts[["a member near each consensus"]] <- all(vapply(per, function(v) min(v) <= 2, logical(1)))
-  }
-  ok_all(paste(label, "check_aa_cdist"), parts)
 }
 
 # Node sequences: IUPAC, one frame per lineage, heavy on every node, light only where the lineage has light chains.
@@ -403,24 +370,16 @@ if (p$ok) {
 
 cat("== twins: one heavy chain with two light chains votes once ==\n")
 tw <- run_trees("twins")
-first <- "twins: a twin shares its source's lineage and score and adds no vote"
+first <- "twins: a twin shares its source's lineage"
 if (!isTRUE(tw$ok)) crashed(tw, first) else {
   here <- file.path(root, "twins")
   twins <- readLines(file.path(here, "twins.txt"))
   sources <- readLines(file.path(here, "sources.txt"))
   lineage_of <- setNames(tw$lineages$lineage_id, tw$lineages$sequence_id)
-  scored <- setNames(tw$cdist$aa_cdist, tw$cdist$sequence_id)
-  counts <- setNames(as.integer(tw$consensus$consensus_sequence_count), tw$consensus$lineage_id)
   lid <- unique(lineage_of[sources])
-  # Every other member of the deep clone carries a distinct heavy sequence.
-  members <- names(lineage_of)[lineage_of %in% lid]
   ok_all(first, list(
-    "same lineage" = length(lid) == 1 && identical(unname(lineage_of[twins]), unname(lineage_of[sources])),
-    "scored" = all(c(twins, sources) %in% names(scored)),
-    "same score" = identical(unname(scored[twins]), unname(scored[sources])),
-    "one vote per heavy sequence" = length(lid) == 1 &&
-      counts[[lid]] == length(members) - sum(members %in% twins)))
-  check_aa_cdist(tw, "twins")
+    "same lineage" = length(lid) == 1 &&
+      identical(unname(lineage_of[twins]), unname(lineage_of[sources]))))
 }
 
 cat("== bulk: 5'-truncated light-less members join the light subgroup of their cell ==\n")
@@ -448,7 +407,7 @@ if (j$ok) {
     "lineage" = length(unique(j$lineages$sequence_id)) == n))
 } else crashed(j, first)
 
-cat("== table: heavy only, alignments on the table, aa-cdist, copies, anchor ==\n")
+cat("== table: heavy only, alignments on the table, copies, anchor ==\n")
 tb <- run_trees("table")
 first <- "table: light chain resolution off, lineages are the heavy clones"
 if (tb$ok) {
@@ -470,16 +429,6 @@ if (tb$ok) {
   check_node_sequences(tb$nodes, "table", run = tb)
   check_node_steps(tb$nodes, "table")
 
-  counts <- setNames(as.integer(tb$consensus$consensus_sequence_count), tb$consensus$lineage_id)
-  v <- as.integer(tb$cdist$aa_cdist)
-  ok_all("table: aa-cdist scores a lineage above the floor and discriminates", list(
-    "above the floor" = any(counts >= AA_CDIST_MIN_SEQUENCES) && nrow(tb$cdist) > 0,
-    "scores differ" = length(unique(v)) > 1))
-  check_aa_cdist(tb, "table")
-  heavy_voter <- readLines(file.path(here, "heavy-voter.txt"))
-  ok("table: the consensus follows abundance, so the dominant member scores 0",
-     identical(tb$cdist$aa_cdist[tb$cdist$sequence_id == heavy_voter], "0") &&
-       grepl("aa-cdist weights: abundance for \\d+ of \\d+ heavy clonotypes, total \\d+, largest 1000", tb$log))
   g <- suppressWarnings(as.integer(tb$germline$germline_mutation_count))
   ok("table: germline mutations, one non-negative count per aligned clonotype, some mutated",
      nrow(tb$germline) > 0 && !any(duplicated(tb$germline$sequence_id)) &&
@@ -491,17 +440,11 @@ if (tb$ok) {
   groups <- setNames(tb$lineages$group_id, tb$lineages$sequence_id)
   nodes_of <- tb$links[tb$links$sequence_id %in% duplicated_ids, ]
   rep_of <- nodes_of$sequence_id[nodes_of$is_representative == "true"]
-  distinct <- tapply(tb$lineages$group_id, tb$lineages$lineage_id, function(g) length(unique(g)))
-  scored <- setNames(tb$cdist$aa_cdist, tb$cdist$sequence_id)
-  ok_all("table: copies group, link, represent, vote once and share a score", list(
+  ok_all("table: copies group, link and represent", list(
     "grouping" = length(unique(groups[duplicated_ids])) == 2 && sum(table(tb$lineages$group_id) > 1) == 2,
     "links" = setequal(nodes_of$sequence_id, duplicated_ids) &&
       length(unique(paste(nodes_of$lineage_id, nodes_of$node_id))) == 2,
-    "representative" = length(rep_of) == 2 && anchor_id %in% rep_of,
-    "one vote per sequence" = all(counts[names(distinct)] == distinct),
-    "shared score" = all(tapply(scored[names(groups)[names(groups) %in% names(scored)]],
-                                groups[names(groups) %in% names(scored)],
-                                function(x) length(unique(x))) == 1)))
+    "representative" = length(rep_of) == 2 && anchor_id %in% rep_of))
   ok("table: heavy-only anchor relatives have no light figure",
      nrow(tb$anchors) > 0 && all(tb$anchors$anchor_id == anchor_id) &&
        all(is.na(suppressWarnings(as.integer(tb$anchors$anchor_nt_light)))))
