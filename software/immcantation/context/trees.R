@@ -790,6 +790,9 @@ voter_group <- voters$heavy_key
 voter_weight <- if (is.null(abundance_path)) rep(1, nrow(voters)) else {
   ab <- read_tsv(abundance_path)
   per_clonotype <- as.numeric(ab$abundance)[match(heavy_seqs$sequence_id, ab$sequence_id)]
+  cat(sprintf("aa-cdist weights: abundance for %d of %d heavy clonotypes, total %g, largest %g\n",
+              sum(!is.na(per_clonotype)), length(per_clonotype),
+              sum(per_clonotype, na.rm = TRUE), max(c(0, per_clonotype), na.rm = TRUE)))
   per_clonotype[is.na(per_clonotype)] <- 0
   w <- tapply(per_clonotype, heavy_seqs$heavy_key, sum)
   rm(ab)

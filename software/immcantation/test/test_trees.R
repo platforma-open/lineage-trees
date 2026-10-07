@@ -478,7 +478,8 @@ if (tb$ok) {
   check_aa_cdist(tb, "table")
   heavy_voter <- readLines(file.path(here, "heavy-voter.txt"))
   ok("table: the consensus follows abundance, so the dominant member scores 0",
-     identical(tb$cdist$aa_cdist[tb$cdist$sequence_id == heavy_voter], "0"))
+     identical(tb$cdist$aa_cdist[tb$cdist$sequence_id == heavy_voter], "0") &&
+       grepl("aa-cdist weights: abundance for \\d+ of \\d+ heavy clonotypes, total \\d+, largest 1000", tb$log))
   g <- suppressWarnings(as.integer(tb$germline$germline_mutation_count))
   ok("table: germline mutations, one non-negative count per aligned clonotype, some mutated",
      nrow(tb$germline) > 0 && !any(duplicated(tb$germline$sequence_id)) &&
