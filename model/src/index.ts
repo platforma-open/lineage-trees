@@ -197,6 +197,8 @@ export type BlockArgs = {
   /** Lists with at least one sequence, sorted by id. */
   sequencesOfInterest: SOIList[];
   igPhyMLScope: IgPhyMLScope;
+  /** Typed subtitle; names the clustering downstream in place of the computed label. Absent when blank. */
+  customBlockLabel?: string;
 };
 
 /** Which shape of clonotyping output a dataset is. */
@@ -541,6 +543,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
         clusteringMode === "adaptive"
           ? (data.sensitivity ?? DEFAULT_SENSITIVITY)
           : DEFAULT_SENSITIVITY,
+      // Undefined when blank, so projects without a subtitle do not stale.
+      customBlockLabel: data.customBlockLabel?.trim() || undefined,
     };
   })
   // Inverse of `init`, so an exported template round-trips.
@@ -1034,7 +1038,7 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   /** A run has finished, with or without an error: an empty table then means no donors. */
   .output("runFinished", (ctx) => ctx.outputs?.getIsReadyOrError() === true)
 
-  .subtitle((ctx) => ctx.data.customBlockLabel || defaultSubtitle(ctx.data))
+  .subtitle((ctx) => ctx.data.customBlockLabel?.trim() || defaultSubtitle(ctx.data))
 
   .sections((ctx) => {
     const trees = currentViews(ctx.data.treeViews, runIdOf(ctx.outputs)).map((v) => ({

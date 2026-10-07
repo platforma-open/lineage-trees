@@ -15,6 +15,12 @@ import { useApp } from "./app";
 
 const app = useApp();
 
+// PlBlockPage hides the subtitle while it is undefined, as it is on a new block.
+const subtitle = computed({
+  get: () => app.model.data.customBlockLabel ?? "",
+  set: (value) => (app.model.data.customBlockLabel = value ?? ""),
+});
+
 // Local, not `app.model.data`: a watcher writing drawer state into block data is a hairpin.
 const view = reactive<{ settingsOpen: boolean; reportOpen: boolean; donor?: string }>({
   settingsOpen: (app.model.data.datasets ?? []).length === 0,
@@ -61,10 +67,7 @@ watch(
 </script>
 
 <template>
-  <PlBlockPage
-    v-model:subtitle="app.model.data.customBlockLabel"
-    :subtitle-placeholder="defaultSubtitle(app.model.data)"
-  >
+  <PlBlockPage v-model:subtitle="subtitle" :subtitle-placeholder="defaultSubtitle(app.model.data)">
     <template #title>Lineage Trees</template>
 
     <template #append>

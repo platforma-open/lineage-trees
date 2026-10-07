@@ -488,6 +488,10 @@ wf.body(func(args) {
 	if useLightChains {
 		traceLabel += ", +light chains"
 	}
+	// A typed subtitle replaces it, as the user named this run.
+	if !is_undefined(args.customBlockLabel) {
+		traceLabel = args.customBlockLabel
+	}
 
 	traceStep := {
 		type: "milaboratories.lineage-trees.clustering",
