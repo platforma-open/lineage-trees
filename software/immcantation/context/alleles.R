@@ -37,6 +37,8 @@ HEAVY <- "IGH"
 THREE_PRIME_MARGIN <- 10L
 # TIgGER takes positions 1 to 312 as the V (IMGT's length), whatever its input.
 IMGT_V_LENGTH <- 312L
+# Sequences per allele given to the novel allele search.
+MAX_PER_ALLELE <- 50000L
 ALIGNED_NEEDED <- c("sequence_id", "v_call", "j_call", "junction", "sequence_alignment",
                     "germline_alignment", "locus", "frame_left")
 
@@ -192,9 +194,20 @@ say("alignment width: median %d, range %d to %d; junction length median %d, rang
     max(nchar(db$sequence_alignment)), as.integer(median(db$junction_length)),
     min(db$junction_length), max(db$junction_length))
 
+# TIgGER's memory follows the largest allele's sequence count: one allele of 435,839 used
+# 14.5 GiB. A seeded sample per allele bounds it and keeps far more than its 200-sequence floors.
+set.seed(1L)
+search_rows <- unlist(lapply(split(seq_len(nrow(db)), once$allele), function(i) {
+  if (length(i) > MAX_PER_ALLELE) sample(i, MAX_PER_ALLELE) else i
+}), use.names = FALSE)
+capped <- sum(per_allele > MAX_PER_ALLELE)
+if (capped) say("%d allele(s) sampled down to %d sequences for the novel allele search\n",
+                capped, MAX_PER_ALLELE)
+
 progress("Looking for novel alleles")
-say("looking for novel alleles over %d sequences, single process\n", nrow(db))
-novel <- tryCatch(findNovelAlleles(db, germline_db, pos_range = pos_range, nproc = 1L),
+say("looking for novel alleles over %d sequences, single process\n", length(search_rows))
+novel <- tryCatch(findNovelAlleles(db[sort(search_rows), , drop = FALSE], germline_db,
+                                   pos_range = pos_range, nproc = 1L),
                   error = function(e) e)
 if (inherits(novel, "error")) {
   finish("reference", sprintf("TIgGER could not look for novel alleles: %s", conditionMessage(novel)))
