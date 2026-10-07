@@ -311,7 +311,6 @@ wf.body(func(args) {
 		return {
 			index: i,
 			key: clonotypingRunId,
-			assemblingFeature: clnsAnnotations["mixcr.com/assemblingFeature"],
 			libraryId: clnsAnnotations["pl7.app/vdj/libraryId"],
 			sampleAxisSpec: sampleAxisSpec,
 			clonotypeAxisSpec: clonotypeAxisSpec,
@@ -347,11 +346,9 @@ wf.body(func(args) {
 	// Light chains are resolved if any dataset carries them, anchor sets included;
 	// bulk members then join with the light half unknown.
 	useLightChains := false
-	anyUpstream := false
 	anyAnchor := false
 	for ds in datasets {
 		useLightChains = useLightChains || ds.useLightChains
-		anyUpstream = anyUpstream || ds.alignmentSource == "upstream"
 		anyAnchor = anyAnchor || ds.isAnchor
 	}
 
@@ -465,9 +462,6 @@ wf.body(func(args) {
 			maxTipsPerTree: args.maxTipsPerTree,
 			minTipsPerTree: args.minTipsPerTree,
 			useLightChains: useLightChains,
-			hasAnchors: anyAnchor,
-			// Only upstream alignments give TIgGER anything to read off the clonotype table.
-			hasUpstream: anyUpstream,
 			datasets: datasetParams
 		}
 	})

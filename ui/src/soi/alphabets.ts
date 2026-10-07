@@ -4,14 +4,11 @@ import type { Alphabet } from "@platforma-open/milaboratories.lineage-trees.mode
 
 export type SequenceValidationResult = {
   readonly alphabetHelper: AlphabetHelper;
-  length: number;
-  wildcards: number;
-  unknownSymbols: number;
   score: number;
 };
 
 function initialValidationStats(alphabetHelper: AlphabetHelper): SequenceValidationResult {
-  return { alphabetHelper, length: 0, unknownSymbols: 0, wildcards: 0, score: 0 };
+  return { alphabetHelper, score: 0 };
 }
 
 export class AlphabetHelper {
@@ -20,7 +17,6 @@ export class AlphabetHelper {
 
   constructor(
     public readonly type: Alphabet,
-    public readonly humanReadableName: string,
     mainSymbols: string,
     wildcards: string,
     private readonly lengthReward: number,
@@ -43,26 +39,18 @@ export class AlphabetHelper {
     if (initialValue.alphabetHelper !== this) {
       throw new Error("Initial value from different alphabet helper.");
     }
-    let { length, wildcards, unknownSymbols, score } = initialValue;
-    length += sequence.length;
-    score += this.lengthReward * sequence.length;
+    let score = initialValue.score + this.lengthReward * sequence.length;
     for (let i = 0; i < sequence.length; ++i) {
       const cv = this.symbols.get(sequence.charAt(i).toLocaleLowerCase());
-      if (cv === false) {
-        wildcards++;
-        score += this.wildcardPenalty;
-      } else if (cv === undefined) {
-        unknownSymbols++;
-        score += this.unknownPenalty;
-      }
+      if (cv === false) score += this.wildcardPenalty;
+      else if (cv === undefined) score += this.unknownPenalty;
     }
-    return { alphabetHelper: this, length, wildcards, unknownSymbols, score };
+    return { alphabetHelper: this, score };
   }
 }
 
 const NucleotideAlphabetHelper = new AlphabetHelper(
   "nucleotide",
-  "Nucleotide",
   "ACGT",
   "RYSWKMBDHVN",
   10,
@@ -71,7 +59,6 @@ const NucleotideAlphabetHelper = new AlphabetHelper(
 );
 const AminoAcidAlphabetHelper = new AlphabetHelper(
   "amino-acid",
-  "Amino Acid",
   "ACDEFGHIKLMNPQRSTVWY",
   "X",
   1,

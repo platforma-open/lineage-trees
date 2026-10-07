@@ -70,7 +70,7 @@ const tableData = computed(() => {
 });
 
 const columnOptions = computed<ListOption<number>[]>(
-  () => tableData.value?.data.columns.map((c, idx) => ({ value: idx, label: c.header })) ?? [],
+  () => tableData.value?.columns.map((c, idx) => ({ value: idx, label: c.header })) ?? [],
 );
 
 type FastaRecord = { readonly description: string; readonly sequence: string };
@@ -109,7 +109,7 @@ const recordsToImport = computed<FastaRecord[] | undefined>(() => {
     const sc = data.sequenceColumn;
     const nc = data.nameColumn;
     if (!tableData.value || sc === undefined || nc === undefined) return undefined;
-    return tableData.value.data.rows
+    return tableData.value.rows
       .filter((r) => r[nc] !== undefined && r[sc] !== undefined)
       .map((r) => ({ description: String(r[nc]), sequence: String(r[sc]) }));
   }
@@ -120,7 +120,7 @@ const sequencesToImport = computed(() => {
   if (fileType.value === "table") {
     const sc = data.sequenceColumn;
     if (!tableData.value || sc === undefined) return undefined;
-    return tableData.value.data.rows.filter((r) => r[sc] !== undefined).map((r) => String(r[sc]));
+    return tableData.value.rows.filter((r) => r[sc] !== undefined).map((r) => String(r[sc]));
   }
   return fastaData.value?.map((r) => r.sequence);
 });

@@ -119,14 +119,14 @@ self.body(func(inputs) {
 		axes: importAxesSpec,
 		columns: resultColumns,
 		storageFormat: "Parquet",
-		partitionKeyLength: 0 // inferPartitionKeyLength(queryData)
+		partitionKeyLength: 0
 	}
 
 	aggregatedConvParams := {
 		axes: aggregationImportAxesSpec,
 		columns: resultColumns,
 		storageFormat: "Parquet",
-		partitionKeyLength: 0 // inferPartitionKeyLength(queryData)
+		partitionKeyLength: 0
 	}
 
 	// One row per tree, its best hit: highest score (alignment) or fewest mutations (tree search).

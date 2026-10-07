@@ -48,7 +48,6 @@ blockTest("no datasets picked", { timeout: 120_000 }, async ({ rawPrj, helpers, 
   const ctx = { rawPrj, helpers, expect, ml };
   const outputs = await runLineageTrees(ctx, { from: [] });
   ctx.expect(value(outputs, "inputOptions")).toEqual([]);
-  ctx.expect(value(outputs, "datasets")).toEqual([]);
 });
 
 blockTest(

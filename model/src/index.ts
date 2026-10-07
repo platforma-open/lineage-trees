@@ -39,7 +39,6 @@ export const PROGRESS_PREFIX = "[==PROGRESS==]";
 /** Member clonotypes per lineage, and the lineage table's default sort key. */
 const LINEAGE_SIZE_COLUMN = "pl7.app/clustering/clusterSize";
 
-/** Content id of the run's trees. Lineage and node ids are valid only within it. Undefined until a run settles. */
 /** Tree node columns plus each sequence list's hits per node, as the tree graph shows them. */
 function nodeColumnsWithHits(outputs: TreeNodeAccessor | undefined) {
   const columns = outputs?.resolve("treeNodes")?.getPColumns();
@@ -206,7 +205,6 @@ export type Modality = "bulk-heavy" | "paired-sc";
 /** Where the tree step gets alignments: `mixcr` from clns, `upstream` from imported columns, `none` gives no trees. */
 export type AlignmentSource = "mixcr" | "upstream" | "none";
 
-/** Per donor group, what the overview shows beside its progress. */
 /** A gene one source (MiXCR or imported datasets) uses and the other never does. */
 export type GeneMismatch = { gene: string; source: "MiXCR" | "imported"; share: number };
 
@@ -310,17 +308,6 @@ function canonicalRefs(refs: PlRef[]): PlRef[] {
   for (const ref of refs) byKey.set(refKey(ref), ref);
   return [...byKey.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, ref]) => ref);
 }
-
-/** What the UI needs to know about one picked dataset, from the pool alone. */
-export type DatasetInfo = {
-  ref: PlRef;
-  label: string;
-  runId: string | undefined;
-  modality: Modality;
-  alignmentRoute: AlignmentSource;
-  sampleAxisKey: string;
-  isAnchor: boolean;
-};
 
 /** A per-donor resource map among the workflow's outputs. */
 const donorResourceMap = (outputs: TreeNodeAccessor | undefined, field: string) =>
@@ -605,30 +592,6 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       if (spec.name !== "pl7.app/metadata" && spec.name !== "pl7.app/label") return false;
       return sampleAxes.size === 0 || sampleAxes.has(axisKey(axis));
     });
-  })
-
-  /** Picked datasets in `args` order; picks whose spec left the pool are dropped. */
-  .output("datasets", (ctx): DatasetInfo[] => {
-    const specs = ctx.resultPool.getSpecs().entries.map((entry) => entry.obj);
-    const labels = datasetLabels(ctx.resultPool);
-    const anchors = new Set((ctx.data.anchorDatasets ?? []).map(refKey));
-    const out: DatasetInfo[] = [];
-    for (const ref of canonicalRefs(ctx.data.datasets ?? [])) {
-      const spec = ctx.resultPool.getPColumnSpecByRef(ref);
-      if (spec === undefined) continue;
-      const modality = datasetModality(spec);
-      if (modality === undefined) continue;
-      out.push({
-        ref,
-        label: labels.get(refKey(ref)) ?? ref.name,
-        runId: spec.axesSpec[1]?.domain?.[RUN_ID_DOMAIN],
-        modality,
-        alignmentRoute: alignmentRouteFor(spec, specs),
-        sampleAxisKey: axisKey(spec.axesSpec[0]),
-        isAnchor: anchors.has(refKey(ref)),
-      });
-    }
-    return out;
   })
 
   /** Datasets on another sample axis than the donor column. They get no donor and are not clustered. */
@@ -1055,8 +1018,6 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
   /** Per-donor stage logs and progress. Absent on projects run before they existed. */
   .output("allelesLogs", (ctx) => stageLogs(ctx.outputs, "allelesLogs"))
   .output("allelesProgress", (ctx) => stageProgress(ctx.outputs, "allelesLogs"))
-  /** Per donor, the route the allele stage took, "tigger" or "reference", and why. */
-  .output("alleleRoutes", (ctx) => donorMap(ctx.outputs, "alleleRoutes", readAlleleRoute))
   // Alignment shows as part of allele inference; its log is read only for liveness.
   .output("alignmentsLogs", (ctx) => stageLogs(ctx.outputs, "alignmentsLogs"))
   .output("clusteringLogs", (ctx) => stageLogs(ctx.outputs, "clusteringLogs"))

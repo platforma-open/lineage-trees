@@ -14,8 +14,8 @@ ensureUniquenessParamsFromPconvParams := func(pfConvParams) {
     }
 }
 
-// Dedups by-nodes output by its native key. "first" keeps the first row per key;
-// "max" or "min" keeps the row with the greatest or least `rankCol`.
+// Dedups by-nodes output by its native key: "max" or "min" keeps the row with the
+// greatest or least `rankCol`.
 ensureUniqueness := func(inputTsv, params, mode, ...rankCol) {
     allCols := []
     for axis in params.axes {
@@ -41,21 +41,14 @@ ensureUniqueness := func(inputTsv, params, mode, ...rankCol) {
         df = df.withColumns(intCasts...)
     }
 
-    result := undefined
-    if mode == "max" || mode == "min" {
-        ll.assert(len(rankCol) == 1, "ensureUniqueness: mode %v needs a ranking column", mode)
-        by := pt.col(rankCol[0])
-        aggs := slices.map(params.columns, func(col) {
-            c := pt.col(col.column)
-            return (mode == "max" ? c.maxBy(by) : c.minBy(by)).alias(col.column)
-        })
-        result = df.groupBy(keyNames...).agg(aggs...)
-    } else {
-        ll.assert(mode == "first", "ensureUniqueness: unknown mode %v", mode)
-        result = df.unique({ subset: keyNames, keep: "first", maintainOrder: true })
-    }
-
-    result.save("output.tsv")
+    ll.assert(mode == "max" || mode == "min", "ensureUniqueness: unknown mode %v", mode)
+    ll.assert(len(rankCol) == 1, "ensureUniqueness: mode %v needs a ranking column", mode)
+    by := pt.col(rankCol[0])
+    aggs := slices.map(params.columns, func(col) {
+        c := pt.col(col.column)
+        return (mode == "max" ? c.maxBy(by) : c.minBy(by)).alias(col.column)
+    })
+    df.groupBy(keyNames...).agg(aggs...).save("output.tsv")
     return wf.run().getFile("output.tsv")
 }
 

@@ -22,15 +22,15 @@ const view = reactive<{ settingsOpen: boolean; reportOpen: boolean; donor?: stri
 });
 
 const hasDonorColumn = computed(() => app.model.data.donorColumn !== undefined);
-// Every clonotype is its own lineage: no V, J and CDR3-length group held two.
-// Five genes are enough to see the pattern; the share is of that source's clonotypes.
 const geneMismatch = computed(() => app.model.outputs.geneMismatch ?? []);
+// Five genes are enough to see the pattern; the share is of that source's clonotypes.
 const geneMismatchText = computed(() =>
   geneMismatch.value
     .slice(0, 5)
     .map((g) => `${g.gene} (${g.source}, ${(100 * g.share).toFixed(0)}%)`)
     .join(", "),
 );
+// Every clonotype is its own lineage: no V, J and CDR3-length group held two.
 const singletonText = computed(() => {
   const donors = app.model.outputs.singletonDonors ?? [];
   if (donors.length === 0) return undefined;
