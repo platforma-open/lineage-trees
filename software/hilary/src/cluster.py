@@ -27,8 +27,8 @@ Stages, in workflow order:
              germline-mutations-<i>.tsv  sequence_id, germline_mutation_count
              expansion-<i>.tsv           sample_id, lineage_id, size_rank, abundance_percent
              member-counts-<i>.tsv       lineage_id, member_count
-             anchor-distances-<i>.tsv    sequence_id, anchor_id, per-chain aa and nt
-                                         mutations to that anchor
+             known-distances-<i>.tsv    sequence_id, known_id, per-chain aa and nt
+                                         mutations to that known antibody
 
 Clustering uses heavy chains only, so bulk and single-cell clonotypes can share
 a lineage. Light chains are applied later by Dowser in `trees.R`.
@@ -247,8 +247,8 @@ def merge(args: argparse.Namespace) -> None:
         clonotypes["sequence_id"] = prefixed(index, clonotypes["sequence_id"])
         clonotypes["dataset"] = index
         clonotypes["data_source"] = data_source
-        # Anchors are known antibodies; the tree step keeps them and measures mates to them.
-        clonotypes["is_anchor"] = "true" if index in args.anchor else "false"
+        # Known antibodies are known antibodies; the tree step keeps them and measures mates to them.
+        clonotypes["is_known"] = "true" if index in args.known else "false"
         clonotype_parts.append(clonotypes)
         abundance = pd.read_csv(abundance_path, sep="\t", dtype=str, keep_default_na=False)
         abundance["sequence_id"] = prefixed(index, abundance["sequence_id"])
@@ -270,17 +270,17 @@ def merge(args: argparse.Namespace) -> None:
             for (dataset, gene), count in genes[genes["gene"] != ""].groupby(["dataset", "gene"]).size().items():
                 usage.setdefault(str(dataset), {}).setdefault(kind, {})[gene] = int(count)
         args.out_gene_usage.write_text(json.dumps(usage, sort_keys=True))
-    # Dataset names and anchors go apart: only the tree step and collect read them, so
-    # renaming a dataset or toggling an anchor leaves the table alignment, allele inference
+    # Dataset names and known antibodies go apart: only the tree step and collect read them, so
+    # renaming a dataset or toggling a known antibody leaves the table alignment, allele inference
     # and clustering read unchanged, and their results are reused.
-    annotation_columns = ["sequence_id", "data_source", "is_anchor"]
+    annotation_columns = ["sequence_id", "data_source", "is_known"]
     if args.out_annotations is not None:
         merged[annotation_columns].to_csv(args.out_annotations, sep="\t", index=False)
-        # The tree step reads anchors only, so renaming a dataset leaves its input unchanged.
-        if args.out_anchors is not None:
-            merged.loc[merged["is_anchor"] == "true", ["sequence_id", "is_anchor"]].to_csv(
-                args.out_anchors, sep="\t", index=False)
-        merged = merged.drop(columns=["data_source", "is_anchor"])
+        # The tree step reads known antibodies only, so renaming a dataset leaves its input unchanged.
+        if args.out_known is not None:
+            merged.loc[merged["is_known"] == "true", ["sequence_id", "is_known"]].to_csv(
+                args.out_known, sep="\t", index=False)
+        merged = merged.drop(columns=["data_source", "is_known"])
     merged.to_csv(args.out_clonotypes, sep="\t", index=False)
     pd.concat(abundance_parts, ignore_index=True).fillna("").to_csv(
         args.out_abundance, sep="\t", index=False
@@ -489,12 +489,12 @@ def _add_member_nodes(lineages: pd.DataFrame, nodes: pd.DataFrame, links: pd.Dat
         return nodes, links
     if "group_id" not in members.columns:
         members = members.assign(group_id=members["sequence_id"])
-    anchors = (set(clonotypes.loc[clonotypes["is_anchor"] == "true", "sequence_id"])
-               if "is_anchor" in clonotypes.columns else set())
-    # As the tree step picks a tip's clonotype: an anchor first, then the lowest id.
+    known = (set(clonotypes.loc[clonotypes["is_known"] == "true", "sequence_id"])
+               if "is_known" in clonotypes.columns else set())
+    # As the tree step picks a tip's clonotype: a known antibody first, then the lowest id.
     members = (members[["lineage_id", "group_id", "sequence_id"]]
                .drop_duplicates(["lineage_id", "sequence_id"])
-               .assign(_other=lambda d: ~d["sequence_id"].isin(anchors))
+               .assign(_other=lambda d: ~d["sequence_id"].isin(known))
                .sort_values(["lineage_id", "group_id", "_other", "sequence_id"]))
     members["is_representative"] = ~members.duplicated(["lineage_id", "group_id"])
     heads = members[members["is_representative"]].copy()
@@ -545,9 +545,9 @@ NODE_PROPERTY_SOURCE_COLUMNS = ["v_call", "j_call", "junction", "cdr1_aa", "cdr2
                                 "sequence_aa", "main_sequence",
                                 "v_call_light", "j_call_light", "junction_light", "cdr1_aa_light",
                                 "cdr2_aa_light", "cdr3_aa_light", "sequence_aa_light",
-                                "main_sequence_light", "is_anchor"]
-ANCHOR_DISTANCE_COLUMNS = ["sequence_id", "anchor_id", "anchor_aa_heavy", "anchor_nt_heavy",
-                           "anchor_aa_light", "anchor_nt_light"]
+                                "main_sequence_light", "is_known"]
+KNOWN_DISTANCE_COLUMNS = ["sequence_id", "known_id", "known_aa_heavy", "known_nt_heavy",
+                           "known_aa_light", "known_nt_light"]
 NODE_PROPERTY_COLUMNS = ["lineage_id", "node_id", *NODE_PROPERTY_SOURCE_COLUMNS]
 
 
@@ -702,9 +702,9 @@ def _write_per_dataset(
     lineages: pd.DataFrame,
     links: pd.DataFrame,
     expansion: pd.DataFrame,
-    anchor_distances: pd.DataFrame,
+    known_distances: pd.DataFrame,
     germline_mutations: pd.DataFrame,
-    anchor_labels: pd.Series,
+    known_labels: pd.Series,
 ) -> None:
     """Write each dataset's rows with the id prefix removed; every file exists, even if empty."""
     args.per_dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -736,38 +736,38 @@ def _write_per_dataset(
                                  GERMLINE_MUTATION_OUT_COLUMNS)
         slice_of(expansion, index, "sample_id").to_csv(
             out / f"expansion-{index}.tsv", sep="\t", index=False)
-        distances = slice_of(anchor_distances, index, "sequence_id")
-        # Candidate-to-anchor links, one file per anchor dataset, written even if empty.
-        for anchor_index in args.anchor:
+        distances = slice_of(known_distances, index, "sequence_id")
+        # Candidate-to-known antibody links, one file per known antibody dataset, written even if empty.
+        for known_index in args.known:
             pair = (
-                distances[dataset_of(distances["anchor_id"]) == anchor_index]
+                distances[dataset_of(distances["known_id"]) == known_index]
                 if not distances.empty else distances
             )
             linked = pd.DataFrame({
                 "sequence_id": pair["sequence_id"] if not pair.empty else pd.Series(dtype=str),
-                "anchor_id": unprefixed(pair["anchor_id"]) if not pair.empty else pd.Series(dtype=str),
+                "known_id": unprefixed(pair["known_id"]) if not pair.empty else pd.Series(dtype=str),
                 "link": 1,
             })
             linked.to_csv(
-                out / f"anchor-links-{index}-{anchor_index}.tsv", sep="\t", index=False)
-        # The anchor's readable label where its producer gives one (MiXCR's Clone Id), else its id
+                out / f"known-links-{index}-{known_index}.tsv", sep="\t", index=False)
+        # The known antibody's readable label where its producer gives one (MiXCR's Clone Id), else its id
         # as its own dataset knows it. The links above keep the id: it is their join key.
         if not distances.empty:
-            label = distances["anchor_id"].map(anchor_labels)
-            distances["anchor_id"] = label.where(label.notna() & (label != ""),
-                                                 unprefixed(distances["anchor_id"]))
-        distances.reindex(columns=ANCHOR_DISTANCE_COLUMNS).to_csv(
-            out / f"anchor-distances-{index}.tsv", sep="\t", index=False)
+            label = distances["known_id"].map(known_labels)
+            distances["known_id"] = label.where(label.notna() & (label != ""),
+                                                 unprefixed(distances["known_id"]))
+        distances.reindex(columns=KNOWN_DISTANCE_COLUMNS).to_csv(
+            out / f"known-distances-{index}.tsv", sep="\t", index=False)
 
 
 def _read_clonotypes(args: argparse.Namespace, donors: list) -> pd.DataFrame:
-    """The clonotypes the tools saw, with merge's dataset name and anchor flag joined back."""
+    """The clonotypes the tools saw, with merge's dataset name and known antibody flag joined back."""
     clonotypes = _read_clonotype_tables(args, donors)
     annotations = getattr(args, "annotations", None)
     if annotations is None or not annotations.exists():
         return clonotypes
     marks = pd.read_csv(annotations, sep="\t", dtype=str, keep_default_na=False)
-    kept = [c for c in clonotypes.columns if c not in ("data_source", "is_anchor")]
+    kept = [c for c in clonotypes.columns if c not in ("data_source", "is_known")]
     return clonotypes[kept].merge(marks.drop_duplicates("sequence_id"), on="sequence_id", how="left").fillna("")
 
 
@@ -894,9 +894,9 @@ def collect(args: argparse.Namespace) -> None:
         if args.germline_mutations_dir is not None:
             germline_parts.append(_read_donor_file(args.germline_mutations_dir, index,
                                                    GERMLINE_MUTATION_COLUMNS))
-        if args.anchor_distances_dir is not None:
+        if args.known_distances_dir is not None:
             distance_parts.append(
-                _read_donor_file(args.anchor_distances_dir, index, ANCHOR_DISTANCE_COLUMNS))
+                _read_donor_file(args.known_distances_dir, index, KNOWN_DISTANCE_COLUMNS))
 
     lineages = _concat(lineage_parts, LINEAGE_FILE_COLUMNS)
     # Empty donors leave no lineage rows, and the concat then drops the donor column too.
@@ -989,22 +989,22 @@ def collect(args: argparse.Namespace) -> None:
     lineage_stats["data_source"] = (
         lineage_stats["lineage_id"].map(_data_sources(lineages, clonotypes)).fillna("")
     )
-    # Anchors per lineage, for the anchored search.
-    if "is_anchor" in clonotypes.columns and not lineages.empty:
-        anchors = set(clonotypes.loc[clonotypes["is_anchor"] == "true", "sequence_id"])
-        held = lineages[lineages["sequence_id"].isin(anchors)].groupby("lineage_id").size()
-        lineage_stats["anchor_count"] = lineage_stats["lineage_id"].map(held).fillna(0).astype(int)
+    # Known antibodies per lineage, for the known antibody search.
+    if "is_known" in clonotypes.columns and not lineages.empty:
+        known = set(clonotypes.loc[clonotypes["is_known"] == "true", "sequence_id"])
+        held = lineages[lineages["sequence_id"].isin(known)].groupby("lineage_id").size()
+        lineage_stats["known_count"] = lineage_stats["lineage_id"].map(held).fillna(0).astype(int)
     else:
-        lineage_stats["anchor_count"] = 0
+        lineage_stats["known_count"] = 0
     lineage_stats.to_csv(args.out_lineage_stats, sep="\t", index=False)
 
     step("Writing per-dataset tables")
-    anchor_labels = (
+    known_labels = (
         clonotypes.drop_duplicates("sequence_id").set_index("sequence_id")["clone_label"]
         if "clone_label" in clonotypes.columns else pd.Series(dtype=str))
     _write_per_dataset(args, lineages, links, expansion,
-                       _concat(distance_parts, ANCHOR_DISTANCE_COLUMNS),
-                       _concat(germline_parts, GERMLINE_MUTATION_COLUMNS), anchor_labels)
+                       _concat(distance_parts, KNOWN_DISTANCE_COLUMNS),
+                       _concat(germline_parts, GERMLINE_MUTATION_COLUMNS), known_labels)
 
     # Per-donor counts for the overview; names match the workflow's groups.
     if args.out_donor_stats is not None:
@@ -1055,17 +1055,17 @@ def main() -> None:
              "and its name as the lineage table shows it",
     )
     m.add_argument(
-        "--anchor",
+        "--known",
         action="append",
         default=[],
-        help="position of a dataset whose clonotypes are anchors; repeat per such dataset",
+        help="position of a dataset whose clonotypes are known antibodies; repeat per such dataset",
     )
     m.add_argument("--out-clonotypes", required=True, type=Path)
     m.add_argument("--out-abundance", required=True, type=Path)
     m.add_argument("--out-annotations", type=Path,
-                   help="dataset name and anchor flag per clonotype, kept out of --out-clonotypes")
-    m.add_argument("--out-anchors", type=Path,
-                   help="sequence_id and is_anchor of the anchor clonotypes only, for the tree step")
+                   help="dataset name and known antibody flag per clonotype, kept out of --out-clonotypes")
+    m.add_argument("--out-known", type=Path,
+                   help="sequence_id and is_known of the known antibody clonotypes only, for the tree step")
     m.add_argument("--out-gene-usage", type=Path,
                    help="JSON: clonotypes per heavy V and J gene, per dataset")
     m.set_defaults(func=merge)
@@ -1115,7 +1115,7 @@ def main() -> None:
 
     k = stages.add_parser("collect", help="merge per-donor tree output and summarise")
     k.add_argument("--lineages-dir", required=True, type=Path)
-    k.add_argument("--annotations", type=Path, help="merge's dataset name and anchor flag per clonotype")
+    k.add_argument("--annotations", type=Path, help="merge's dataset name and known antibody flag per clonotype")
     k.add_argument(
         "--donor",
         action="append",
@@ -1126,7 +1126,7 @@ def main() -> None:
     k.add_argument("--node-links-dir", required=True, type=Path)
     k.add_argument("--builders-dir", type=Path)
     k.add_argument("--germline-mutations-dir", type=Path)
-    k.add_argument("--anchor-distances-dir", type=Path)
+    k.add_argument("--known-distances-dir", type=Path)
     k.add_argument("--abundance", type=Path)
     k.add_argument("--donors", type=Path)
     k.add_argument("--out-nodes", required=True, type=Path)
@@ -1141,10 +1141,10 @@ def main() -> None:
                    help="a dataset's sample_id plus meta_<k> columns; repeat once per dataset")
     k.add_argument("--out-node-metadata", type=Path)
     k.add_argument(
-        "--anchor",
+        "--known",
         action="append",
         default=[],
-        help="position of a dataset whose clonotypes are anchors; repeat per such dataset",
+        help="position of a dataset whose clonotypes are known antibodies; repeat per such dataset",
     )
     k.add_argument("--out-node-abundance", type=Path,
                    help="each node's summed abundance and how many clonotypes it stands for")

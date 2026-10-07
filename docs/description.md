@@ -4,7 +4,7 @@ Groups B cell clonotypes into clonal lineages and builds a tree for each lineage
 
 Clonotypes are grouped into lineages by their heavy chain with HILARy, using a fixed similarity threshold or its adaptive mode, and split by light chain where light chains are present. TIgGER first infers the donor's V gene alleles. Each lineage then gets a tree with its ancestral sequences reconstructed, built with FastTree and RAxML-NG through Dowser, or optionally with IgPhyML.
 
-Every clonotype gets its heavy chain mutation count from the germline. Known antibodies can be added as anchors, and every other member of their lineage gets its distance to the nearest anchor. The ranking columns and lineage ids go to downstream blocks such as Lead Selection.
+Every clonotype gets its heavy chain mutation count from the germline. Datasets of known antibodies can be marked as such, and every other member of their lineage gets its distance to the nearest known antibody. The ranking columns and lineage ids go to downstream blocks such as Lead Selection.
 
 When using this block in your research, cite the publications for the tools your run relied on, listed below.
 

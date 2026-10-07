@@ -45,7 +45,7 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
             "--out-node-links", file.path(outdir, "node-links.tsv"),
             "--out-builders", file.path(outdir, "builders.tsv"),
             "--out-germline-mutations", file.path(outdir, "germline-mutations.tsv"),
-            "--out-anchor-distances", file.path(outdir, "anchor-distances.tsv"))
+            "--out-known-distances", file.path(outdir, "known-distances.tsv"))
   log <- system2("Rscript", argv, stdout = TRUE, stderr = TRUE)
   status <- attr(log, "status")
   list(ok = is.null(status), log = paste(c(align_log, log), collapse = "\n"), dir = outdir,
@@ -55,7 +55,7 @@ run_one <- function(scenario, ..., light = FALSE, builder = "raxml", airr = TRUE
        links = if (is.null(status)) read_tsv(file.path(outdir, "node-links.tsv")),
        builders = if (is.null(status)) read_tsv(file.path(outdir, "builders.tsv")),
        germline = if (is.null(status)) read_tsv(file.path(outdir, "germline-mutations.tsv")),
-       anchors = if (is.null(status)) read_tsv(file.path(outdir, "anchor-distances.tsv")))
+       known = if (is.null(status)) read_tsv(file.path(outdir, "known-distances.tsv")))
 }
 
 # All scenarios run in parallel before any check.
@@ -287,7 +287,7 @@ check_truncated <- function(r, label, junction_only = FALSE) {
   if (!junction_only) check_topology(r$nodes, label)
 }
 
-cat("== paired: light chains, split, dark, anchor, insertions, a slash in the ids ==\n")
+cat("== paired: light chains, split, dark, known antibody, insertions, a slash in the ids ==\n")
 p <- run_trees("paired")
 first <- "paired: every clonotype gets one lineage, both chains joined"
 if (p$ok) {
@@ -354,18 +354,18 @@ if (p$ok) {
     "observed nodes linked" = sum(p$nodes$is_observed == "true") == nrow(p$links)))
 
   # A light figure needs a light chain at both ends.
-  anchor_id <- readLines(file.path(here, "anchor.txt"))
-  d <- p$anchors
+  known_id <- readLines(file.path(here, "known.txt"))
+  d <- p$known
   as_int <- function(x) suppressWarnings(as.integer(x))
   no_light <- d$sequence_id %in% lightless
-  with_light <- !no_light & !is.na(as_int(d$anchor_nt_light))
-  ok_all("paired: anchor distances, heavy set, light only with both chains", list(
-    "relatives to the anchor" = nrow(d) > 0 && all(d$anchor_id == anchor_id) && !(anchor_id %in% d$sequence_id),
-    "heavy set, aa within nt" = all(!is.na(as_int(d$anchor_nt_heavy))) &&
-      all(as_int(d$anchor_aa_heavy) <= as_int(d$anchor_nt_heavy)),
-    "no light figure without light" = any(no_light) && all(is.na(as_int(d$anchor_nt_light[no_light]))),
+  with_light <- !no_light & !is.na(as_int(d$known_nt_light))
+  ok_all("paired: known antibody distances, heavy set, light only with both chains", list(
+    "relatives to the known antibody" = nrow(d) > 0 && all(d$known_id == known_id) && !(known_id %in% d$sequence_id),
+    "heavy set, aa within nt" = all(!is.na(as_int(d$known_nt_heavy))) &&
+      all(as_int(d$known_aa_heavy) <= as_int(d$known_nt_heavy)),
+    "no light figure without light" = any(no_light) && all(is.na(as_int(d$known_nt_light[no_light]))),
     "light figure when paired, aa within nt" = any(with_light) &&
-      all(as_int(d$anchor_aa_light[with_light]) <= as_int(d$anchor_nt_light[with_light]))))
+      all(as_int(d$known_aa_light[with_light]) <= as_int(d$known_nt_light[with_light]))))
 } else crashed(p, first)
 
 cat("== twins: one heavy chain with two light chains votes once ==\n")
@@ -407,7 +407,7 @@ if (j$ok) {
     "lineage" = length(unique(j$lineages$sequence_id)) == n))
 } else crashed(j, first)
 
-cat("== table: heavy only, alignments on the table, copies, anchor ==\n")
+cat("== table: heavy only, alignments on the table, copies, known antibody ==\n")
 tb <- run_trees("table")
 first <- "table: light chain resolution off, lineages are the heavy clones"
 if (tb$ok) {
@@ -436,7 +436,7 @@ if (tb$ok) {
        all(tb$germline$sequence_id %in% tb$aligned$sequence_id))
 
   duplicated_ids <- readLines(file.path(here, "duplicated.txt"))
-  anchor_id <- readLines(file.path(here, "anchor.txt"))
+  known_id <- readLines(file.path(here, "known.txt"))
   groups <- setNames(tb$lineages$group_id, tb$lineages$sequence_id)
   nodes_of <- tb$links[tb$links$sequence_id %in% duplicated_ids, ]
   rep_of <- nodes_of$sequence_id[nodes_of$is_representative == "true"]
@@ -444,10 +444,10 @@ if (tb$ok) {
     "grouping" = length(unique(groups[duplicated_ids])) == 2 && sum(table(tb$lineages$group_id) > 1) == 2,
     "links" = setequal(nodes_of$sequence_id, duplicated_ids) &&
       length(unique(paste(nodes_of$lineage_id, nodes_of$node_id))) == 2,
-    "representative" = length(rep_of) == 2 && anchor_id %in% rep_of))
-  ok("table: heavy-only anchor relatives have no light figure",
-     nrow(tb$anchors) > 0 && all(tb$anchors$anchor_id == anchor_id) &&
-       all(is.na(suppressWarnings(as.integer(tb$anchors$anchor_nt_light)))))
+    "representative" = length(rep_of) == 2 && known_id %in% rep_of))
+  ok("table: heavy-only known antibody relatives have no light figure",
+     nrow(tb$known) > 0 && all(tb$known$known_id == known_id) &&
+       all(is.na(suppressWarnings(as.integer(tb$known$known_nt_light)))))
 } else crashed(tb, first)
 
 cat("== truncated: full, FR2, CDR2 and '.'-padded coverage in one lineage ==\n")
@@ -459,13 +459,13 @@ if (isTRUE(tr$ok)) {
     "padded" = grepl("padded to a common frame", tr$log) && !grepl("alignment lengths differ", tr$log)))
 }
 
-cat("== marks: anchors read from merge's annotations table ==\n")
+cat("== marks: known antibodies read from merge's annotations table ==\n")
 mk <- run_trees("marks")
 tb2 <- run_trees("table")
 if (isTRUE(mk$ok) && isTRUE(tb2$ok)) {
-  key <- function(a) sort(paste(a$sequence_id, a$anchor_id))
-  ok("marks: anchors come from the annotations table, as they did from the clonotype table",
-     nrow(mk$anchors) > 0 && identical(key(mk$anchors), key(tb2$anchors)))
+  key <- function(a) sort(paste(a$sequence_id, a$known_id))
+  ok("marks: known antibodies come from the annotations table, as they did from the clonotype table",
+     nrow(mk$known) > 0 && identical(key(mk$known), key(tb2$known)))
 } else crashed(if (isTRUE(mk$ok)) tb2 else mk, "marks: runs")
 
 cat("== oddids: ':', ';', ',', '=' and spaces in clonotype ids ==\n")

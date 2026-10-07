@@ -2,7 +2,7 @@
 # Build MiXCR-shaped inputs for trees.R from dowser's paired example data.
 # Each scenario packs many cases into one run, since starting R with dowser is the main cost.
 # Scenarios under <out>/:
-#   paired     AIRR route with light chains: split light V/J, light-less clones, anchor, insertions, "/" in ids
+#   paired     AIRR route with light chains: split light V/J, light-less clones, known antibody, insertions, "/" in ids
 #   joins      AIRR route with an ambiguous tuple join
 #   table      heavy only, alignments on the clonotype table; deep lineage and exact copies
 #   truncated  table route with partial 5' coverage
@@ -48,7 +48,7 @@ write_scenario <- function(dir, heavy, light, light_less, with_light_columns = T
     clono$sequence_alignment <- heavy$sequence_alignment
     clono$germline_alignment <- heavy$germline_alignment
   }
-  if ("is_anchor" %in% names(heavy)) clono$is_anchor <- heavy$is_anchor
+  if ("is_known" %in% names(heavy)) clono$is_known <- heavy$is_known
   if (with_light_columns) {
     clono$v_call_light <- blank(lh$v_call)
     clono$j_call_light <- blank(lh$j_call)
@@ -89,13 +89,13 @@ split_light$v_call[split_light$cell_id %in% recombined] <- "IGLV9-49*01"
 split_light$j_call[split_light$cell_id %in% recombined] <- "IGLJ3*02"
 # Two clones with no light chain; the second drops a member to fall under RAxML's 4-sequence floor.
 dark <- c(clone_of(2), clone_of(3)[-1])
-anchored <- clone_of(4)
+known_clone <- clone_of(4)
 insert_at <- function(aln, pos, what) {
   s <- strsplit(aln, "")[[1]]
   paste(c(s[1:pos], what, s[(pos + 1):length(s)]), collapse = "")
 }
 paired <- heavy[heavy$cell_id != clone_of(3)[1], ]
-paired$is_anchor <- ifelse(paired$cell_id == anchored[1], "true", "false")
+paired$is_known <- ifelse(paired$cell_id == known_clone[1], "true", "false")
 # FR1 insertions ("-" in germline): 3nt off a codon boundary, 6nt on one. Plus one 1nt deletion in the query.
 odd <- seq(1, nrow(paired), by = 2)
 for (i in odd) {
@@ -106,11 +106,11 @@ for (i in odd) {
 }
 substr(paired$sequence_alignment[odd[1]], 60, 60) <- "-"
 write_scenario(file.path(out_root, "paired"), paired, split_light,
-               c(dark, anchored[2]), clone_prefix = "mouse D0_1/")
+               c(dark, known_clone[2]), clone_prefix = "mouse D0_1/")
 note("paired", "recombined.txt", key(recombined))
 note("paired", "split-clone.txt", paste0("mouse D0_1/", names(sizes)[1]))
 note("paired", "dark.txt", key(dark))
-note("paired", "anchor.txt", key(anchored[1]))
+note("paired", "known.txt", key(known_clone[1]))
 note("paired", "inserted-rows.txt", as.character(length(odd)))
 
 # --- bulk -----------------------------------------------------------------
@@ -145,7 +145,7 @@ write_scenario(file.path(out_root, "joins"), wide, one_light, character())
 
 # --- table ----------------------------------------------------------------
 # Pad the biggest clone with mutants, and copy two members exactly.
-# One copy is an anchor; each pair must merge into one tip that keeps the anchor and both links.
+# One copy is a known antibody; each pair must merge into one tip that keeps the known antibody and both links.
 point_mutate <- function(aln, positions) {
   s <- strsplit(aln, "")[[1]]
   usable <- which(s %in% c("A", "C", "G", "T"))
@@ -166,11 +166,11 @@ deep <- rbind(heavy, extra)
 dup <- deep_source[1:2, ]
 dup$cell_id <- paste0(dup$cell_id, "_copy")
 table_db <- rbind(deep, dup)
-table_db$is_anchor <- ifelse(table_db$cell_id == dup$cell_id[1], "true", "false")
+table_db$is_known <- ifelse(table_db$cell_id == dup$cell_id[1], "true", "false")
 write_scenario(file.path(out_root, "table"), table_db, light, character(),
                with_light_columns = FALSE, alignments = "table")
 note("table", "duplicated.txt", key(c(deep_source$cell_id[1:2], dup$cell_id)))
-note("table", "anchor.txt", key(dup$cell_id[1]))
+note("table", "known.txt", key(dup$cell_id[1]))
 
 # --- twins ----------------------------------------------------------------
 # The deep clone plus twins of three members: the same heavy chain, a light chain one FR1
@@ -203,15 +203,15 @@ write_scenario(file.path(out_root, "truncated"), truncated, light, character(),
                with_light_columns = FALSE, alignments = "table")
 
 # --- marks -----------------------------------------------------------------
-# The table scenario with anchors in a separate annotations table, as merge now writes them.
+# The table scenario with known antibodies in a separate annotations table, as merge now writes them.
 marks_dir <- file.path(out_root, "marks")
 dir.create(marks_dir, showWarnings = FALSE)
 file.copy(list.files(file.path(out_root, "table"), full.names = TRUE), marks_dir, recursive = TRUE)
 marks_clono <- read.delim(file.path(marks_dir, "clonotypes.tsv"), colClasses = "character")
 write.table(data.frame(sequence_id = marks_clono$sequence_id, data_source = "table",
-                       is_anchor = marks_clono$is_anchor),
+                       is_known = marks_clono$is_known),
             file.path(marks_dir, "annotations.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(marks_clono[, setdiff(names(marks_clono), "is_anchor")],
+write.table(marks_clono[, setdiff(names(marks_clono), "is_known")],
             file.path(marks_dir, "clonotypes.tsv"), sep = "\t", quote = FALSE, row.names = FALSE, na = "")
 
 # --- oddids ----------------------------------------------------------------

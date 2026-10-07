@@ -16,14 +16,14 @@ export function describeRun(
   const builder =
     args.igPhyMLScope === "all"
       ? "IgPhyML HLP19"
-      : args.igPhyMLScope === "anchored"
-        ? "IgPhyML HLP19 for lineages holding an anchor and FastTree+RAxML GTR elsewhere"
+      : args.igPhyMLScope === "known"
+        ? "IgPhyML HLP19 for lineages holding a known antibody and FastTree+RAxML GTR elsewhere"
         : "FastTree+RAxML GTR";
-  const anchorSets = runs.filter((run) => run.isAnchor).length;
-  const anchored =
-    anchorSets === 0
+  const knownSets = runs.filter((run) => run.isKnown).length;
+  const knownPart =
+    knownSets === 0
       ? ""
-      : ` ${anchorSets === 1 ? "1 dataset" : `${anchorSets} datasets`} as anchor sets.`;
+      : ` ${knownSets === 1 ? "1 dataset" : `${knownSets} datasets`} as known antibody datasets.`;
   const single = runs.some((run) => run.modality === "paired-sc");
   const bulk = runs.some((run) => run.modality === "bulk-heavy");
   const data =
@@ -36,7 +36,7 @@ export function describeRun(
           ? `, CDR3 only for ${cdr3Only === 1 ? "1 donor" : `${cdr3Only} donors`} with clonotypes lacking alignments`
           : "")
       : `Lineages from heavy chain CDR3 by single linkage at ${args.clusteringThreshold} of the CDR3 length`;
-  // Light chains are used wherever a dataset carries them, anchor sets included.
+  // Light chains are used wherever a dataset carries them, known antibody datasets included.
   const lineages = single
     ? `${clustering}, split by light chain V, J and junction length;` +
       ` trees over heavy and light with ${builder} and a separate model per chain.`
@@ -61,5 +61,5 @@ export function describeRun(
         : byRoute("reference") === 0
           ? `V alleles inferred with TIgGER for every donor, pooled over its datasets.`
           : `V alleles inferred with TIgGER for ${inferredCount} of ${routes.length} donors; reference alleles for the rest.`;
-  return `${data}.${anchored} ${lineages} Alignments: ${joinLabels(alignments)}. ${alleles}`;
+  return `${data}.${knownPart} ${lineages} Alignments: ${joinLabels(alignments)}. ${alleles}`;
 }

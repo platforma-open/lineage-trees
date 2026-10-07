@@ -54,9 +54,9 @@ igphyml <- Sys.getenv("IGPHYML_EXEC", on_path("igphyml", "/usr/local/share/igphy
 # Native igphyml finds its hotspot tables only through IGPHYML_PATH; the image has them at its built-in path.
 motifs <- file.path(dirname(igphyml), "..", "share", "igphyml", "motifs")
 if (is.na(Sys.getenv("IGPHYML_PATH", NA)) && dir.exists(motifs)) Sys.setenv(IGPHYML_PATH = normalizePath(motifs))
-# Which lineages IgPhyML builds: "none", "anchored" or "all". FastTree+RAxML build the rest.
+# Which lineages IgPhyML builds: "none", "known" or "all". FastTree+RAxML build the rest.
 igphyml_scope <- if (is.null(opt("--igphyml-scope", required = FALSE))) "none" else opt("--igphyml-scope")
-anchor_path <- opt("--out-anchor-distances", required = FALSE)
+known_path <- opt("--out-known-distances", required = FALSE)
 # A lineage above this many tips is subsampled to it. Absent means no cap.
 max_tips <- {
   m <- opt("--max-tips", required = FALSE)
@@ -141,11 +141,11 @@ STEP_COLUMNS <- unlist(lapply(c("heavy", "light"), function(chain) paste0(chain,
 NODE_COLUMNS <- c("lineage_id", "node_id", "parent_id", "distance", "is_observed", "label",
                   "heavy_sequence", "light_sequence", "node_depth",
                   "terminal_branch_fraction", "parent_descendant_count", STEP_COLUMNS)
-# Every distance is to the one anchor `anchor_id` names, chosen by the heavy chain.
+# Every distance is to the one known antibody `known_id` names, chosen by the heavy chain.
 # Heavy chain differences from the germline, per clonotype.
 GERMLINE_MUTATION_COLUMNS <- c("sequence_id", "lineage_id", "germline_mutation_count")
-ANCHOR_COLUMNS <- c("sequence_id", "anchor_id", "anchor_aa_heavy", "anchor_nt_heavy",
-                    "anchor_aa_light", "anchor_nt_light")
+KNOWN_COLUMNS <- c("sequence_id", "known_id", "known_aa_heavy", "known_nt_heavy",
+                    "known_aa_light", "known_nt_light")
 
 # Why each lineage got no tree, by lineage id. The first reason recorded stands.
 # An environment, not a named vector: growing a vector one lineage at a time is quadratic.
@@ -204,7 +204,7 @@ finish_empty <- function(reason, membership = NULL) {
     }
   }
   write_absent(germline_mutations_path, GERMLINE_MUTATION_COLUMNS)
-  write_absent(anchor_path, ANCHOR_COLUMNS)
+  write_absent(known_path, KNOWN_COLUMNS)
   close_log()
   quit(status = 0)
 }
@@ -229,11 +229,11 @@ if (use_light && !has_light_columns) {
 
 present <- function(x) !is.na(x) & nzchar(x)
 
-# Anchors, as `merge` marked them; the "anchored" IgPhyML scope builds their lineages. They
+# Known antibodies, as `merge` marked them; the "known" IgPhyML scope builds their lineages. They
 # come apart from the clonotype table, so toggling one does not rerun the steps before this.
 annotations_path <- opt("--annotations", required = FALSE)
 marks <- if (!is.null(annotations_path) && file.exists(annotations_path)) read_tsv(annotations_path) else clono
-anchor_ids <- if ("is_anchor" %in% names(marks)) marks$sequence_id[marks$is_anchor == "true"] else character(0)
+known_ids <- if ("is_known" %in% names(marks)) marks$sequence_id[marks$is_known == "true"] else character(0)
 rm(marks)
 
 if (stage == "align") {
@@ -625,7 +625,7 @@ if (any(unmatched)) {
               sum(unmatched), length(unmatched), pct(sum(unmatched), length(unmatched))))
 }
 # Sequence groups: clonotypes identical on every chain are one group and one tip,
-# compared on the rebuilt alignments. A group with an anchor is an anchor and is
+# compared on the rebuilt alignments. A group with a known antibody is a known antibody and is
 # represented by it, else by the lowest id. Every member links to the tip.
 group_of <- function(d) {
   chains <- split(paste(d$locus, d$sequence_alignment), d$sequence_id)
@@ -633,8 +633,8 @@ group_of <- function(d) {
   lineage <- vapply(split(d$lineage_id, d$sequence_id), function(x) x[1], character(1))
   ids <- names(signature)
   groups <- paste(lineage[ids], signature)
-  # Anchors first, then lowest id; `order` is stable, so each group's first row represents it.
-  o <- order(groups, !(ids %in% anchor_ids), ids)
+  # Known antibodies first, then lowest id; `order` is stable, so each group's first row represents it.
+  o <- order(groups, !(ids %in% known_ids), ids)
   data.frame(sequence_id = ids[o], group_id = groups[o],
              is_representative = !duplicated(groups[o]),
              stringsAsFactors = FALSE)
@@ -736,7 +736,7 @@ rows_by_lineage <- function(d) {
 
 # Per-lineage downsampling, off by default (FastTree+RAxML is near-linear in tips).
 # Random, not by abundance, which would oversample the expanded clade; counts distinct
-# sequences, keeps anchors, seeded by lineage id. Dropped clonotypes lose only tree columns.
+# sequences, keeps known antibodies, seeded by lineage id. Dropped clonotypes lose only tree columns.
 
 lineage_seed <- function(lid) sum(utf8ToInt(lid) * seq_along(utf8ToInt(lid))) %% .Machine$integer.max
 progress("Selecting tips and building lineage germlines")
@@ -751,10 +751,10 @@ for (k in seq_along(lineages)) {
   # A group is a tip, so the cap counts groups.
   by_group <- split(resolved$sequence_id[heavy], resolved$group_id[heavy])
   if (length(by_group) <= max_tips) next
-  with_anchor <- vapply(split(resolved$sequence_id[heavy] %in% anchor_ids, resolved$group_id[heavy]), any, logical(1))
-  others <- which(!with_anchor)
+  with_known <- vapply(split(resolved$sequence_id[heavy] %in% known_ids, resolved$group_id[heavy]), any, logical(1))
+  others <- which(!with_known)
   set.seed(lineage_seed(names(lineages)[k]))
-  chosen <- c(which(with_anchor), others[sample.int(length(others), max(0L, max_tips - sum(with_anchor)))])
+  chosen <- c(which(with_known), others[sample.int(length(others), max(0L, max_tips - sum(with_known)))])
   keep <- unlist(by_group[chosen], use.names = FALSE)
   kept_rows[rows[!(resolved$sequence_id[rows] %in% keep)]] <- FALSE
   capped <- capped + 1L
@@ -867,20 +867,20 @@ format_lineages <- function(d, nproc) {
 # Both chains: per-chain omega and rate (IgPhyML), scaled branch lengths (RAxML).
 partition_for <- function(b) if (chain == "HL") { if (b == "igphyml") "hl" else "scaled" } else NULL
 
-# Builder per lineage: IgPhyML (slow) for none, anchor lineages, or all; RAxML otherwise.
+# Builder per lineage: IgPhyML (slow) for none, lineages holding a known antibody, or all; RAxML otherwise.
 tip_rows <- split(seq_len(nrow(tips_db)), factor(tips_db$lineage_key, levels = unique(tips_db$lineage_key)))
 lineage_keys <- names(tip_rows)
-anchored_keys <- unique(resolved$lineage_key[resolved$sequence_id %in% anchor_ids])
+known_lineage_keys <- unique(resolved$lineage_key[resolved$sequence_id %in% known_ids])
 builder_of <- if (igphyml_scope == "all") {
   rep("igphyml", length(lineage_keys))
-} else if (igphyml_scope == "anchored") {
-  ifelse(lineage_keys %in% anchored_keys, "igphyml", "raxml")
+} else if (igphyml_scope == "known") {
+  ifelse(lineage_keys %in% known_lineage_keys, "igphyml", "raxml")
 } else {
   rep("raxml", length(lineage_keys))
 }
-cat(sprintf("tree builders: %d lineages with IgPhyML, %d with FastTree+RAxML (scope %s, %d lineages hold an anchor)\n",
+cat(sprintf("tree builders: %d lineages with IgPhyML, %d with FastTree+RAxML (scope %s, %d lineages hold a known antibody)\n",
             sum(builder_of == "igphyml"), sum(builder_of == "raxml"), igphyml_scope,
-            sum(lineage_keys %in% anchored_keys)))
+            sum(lineage_keys %in% known_lineage_keys)))
 
 # Ancestral sequences: IgPhyML and parsimony write IUPAC codes where uncertain, dowser's
 # RAxML the single best base. So RAxML gets IgPhyML's credible-set rule, applied to
@@ -1028,17 +1028,17 @@ collapse_tree <- function(p) {
   p
 }
 
-# Node rows and anchor distances for one tree. `lid` is the real lineage id, `gapped_*`
+# Node rows and known antibody distances for one tree. `lid` is the real lineage id, `gapped_*`
 # the rebuilt rows with their deletions, `heavy_width` where heavy ends (dowser joins heavy then light).
 tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer_) {
-  anchors <- NULL
+  known <- NULL
   # Tips carry surrogate ids (see TIP_REAL); "Germline" and anything unmapped stay as they are.
   tips <- p$tip.label
   real <- unname(TIP_REAL[tips])
   labels <- c(ifelse(is.na(real), tips, real), rep(NA_character_, p$Nnode))
   parent <- rep(NA_integer_, length(labels))
   dist <- rep(NA_real_, length(labels))
-  # A collapsed tree's edge matrix can come back double; the anchor walk wants ids.
+  # A collapsed tree's edge matrix can come back double; the known antibody walk wants ids.
   parent[p$edge[, 2]] <- as.integer(p$edge[, 1])
   dist[p$edge[, 2]] <- p$edge.length
   # Reconstructed sequence at each node; a tip's is its observed one.
@@ -1136,10 +1136,10 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
     carries[[chain]] <- carried
   }
 
-  # Anchored search: settled mutations along the tree from each non-anchor tip to the
-  # nearest anchor (by heavy aa, then nt, then label). Light figures need light at both ends.
-  anchors_here <- which(labels %in% anchor_ids)
-  if (length(anchors_here)) {
+  # Known antibody search: settled mutations along the tree from every other tip to the
+  # nearest known antibody (by heavy aa, then nt, then label). Light figures need light at both ends.
+  known_here <- which(labels %in% known_ids)
+  if (length(known_here)) {
     # Settled mutations from the root to each node, so any path cost is a difference.
     root_cost <- function(per_branch) {
       cost <- rep(0L, n_nodes)
@@ -1152,32 +1152,32 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
       while (!is.na(n)) { out[n] <- TRUE; n <- parent[n] }
       out
     }
-    anchors_here <- anchors_here[order(labels[anchors_here])]
-    anchor_lines <- lapply(anchors_here, on_line)
-    candidates <- which(!is.na(labels) & labels != "Germline" & !(labels %in% anchor_ids))
+    known_here <- known_here[order(labels[known_here])]
+    known_lines <- lapply(known_here, on_line)
+    candidates <- which(!is.na(labels) & labels != "Germline" & !(labels %in% known_ids))
     if (length(candidates)) {
-      path <- function(cost, cand, k, lca) cost[cand] + cost[anchors_here[k]] - 2L * cost[lca]
+      path <- function(cost, cand, k, lca) cost[cand] + cost[known_here[k]] - 2L * cost[lca]
       rows <- lapply(candidates, function(cand) {
-        lcas <- vapply(seq_along(anchors_here), function(k) {
+        lcas <- vapply(seq_along(known_here), function(k) {
           lca <- cand
-          while (!anchor_lines[[k]][lca]) lca <- parent[lca]
+          while (!known_lines[[k]][lca]) lca <- parent[lca]
           lca
         }, integer(1))
-        heavy_nt <- vapply(seq_along(anchors_here), function(k) path(costs$heavy$nt, cand, k, lcas[k]), integer(1))
-        heavy_aa <- vapply(seq_along(anchors_here), function(k) path(costs$heavy$aa, cand, k, lcas[k]), integer(1))
+        heavy_nt <- vapply(seq_along(known_here), function(k) path(costs$heavy$nt, cand, k, lcas[k]), integer(1))
+        heavy_aa <- vapply(seq_along(known_here), function(k) path(costs$heavy$aa, cand, k, lcas[k]), integer(1))
         # `order` is stable, so ties fall to the label order set above.
         k <- order(heavy_aa, heavy_nt)[1]
-        light_ok <- !is.null(costs$light) && carries$light[cand] && carries$light[anchors_here[k]]
+        light_ok <- !is.null(costs$light) && carries$light[cand] && carries$light[known_here[k]]
         data.frame(
           sequence_id = labels[cand],
-          anchor_id = labels[anchors_here[k]],
-          anchor_aa_heavy = heavy_aa[k],
-          anchor_nt_heavy = heavy_nt[k],
-          anchor_aa_light = if (light_ok) path(costs$light$aa, cand, k, lcas[k]) else NA_integer_,
-          anchor_nt_light = if (light_ok) path(costs$light$nt, cand, k, lcas[k]) else NA_integer_,
+          known_id = labels[known_here[k]],
+          known_aa_heavy = heavy_aa[k],
+          known_nt_heavy = heavy_nt[k],
+          known_aa_light = if (light_ok) path(costs$light$aa, cand, k, lcas[k]) else NA_integer_,
+          known_nt_light = if (light_ok) path(costs$light$nt, cand, k, lcas[k]) else NA_integer_,
           stringsAsFactors = FALSE)
       })
-      anchors <- do.call(rbind, rows)
+      known <- do.call(rbind, rows)
     }
   }
 
@@ -1205,7 +1205,7 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
     nodes[[paste0(chain, "_aa_mutations_from_parent")]] <- if (is.null(s)) blank_text else s$aa_text
     nodes[[paste0(chain, "_aa_mutation_count_from_parent")]] <- if (is.null(s)) blank_count else s$aa_count
   }
-  list(nodes = nodes[, NODE_COLUMNS], anchors = anchors)
+  list(nodes = nodes[, NODE_COLUMNS], known = known)
 }
 
 # A build step to its result: collapsed tree rows and builder.
@@ -1287,7 +1287,7 @@ POOL_EXPORTS <- c("attempt_build", "usable_build", "why_build", "build_lineage",
                   "min_tips",
                   "rethreshold_raxml", "iupac_from_probs", "igphyml", "raxml",
                   "ASR_CREDIBLE_MASS", "IUPAC_BY_MASK", "UNAMBIGUOUS", "BUILDER_LABEL",
-                  "anchor_ids",
+                  "known_ids",
                   # tree_rows counts steps per chain and in amino acids.
                   "NODE_COLUMNS", "SETTLED_AA", "translate_all", "CODON_TABLE", "GAP_AA",
                   "AMBIGUOUS_AA")
@@ -1565,18 +1565,18 @@ cat(sprintf("collapsed %d of %d internal nodes with identical reconstructed sequ
 trees <- data.frame(clone_id = vapply(built_ok, function(r) r$clone_id, character(1)),
                     tree_builder = vapply(built_ok, function(r) r$builder, character(1)),
                     stringsAsFactors = FALSE)
-anchor_rows <- Filter(Negate(is.null), lapply(built_ok, function(r) r$anchors))
+known_rows <- Filter(Negate(is.null), lapply(built_ok, function(r) r$known))
 nodes <- as.data.frame(dplyr::bind_rows(lapply(built_ok, function(r) r$nodes)))
 rm(built_ok)
 write.table(nodes, nodes_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
 
-if (!is.null(anchor_path)) {
-  distances <- if (length(anchor_rows)) do.call(rbind, anchor_rows) else
-    as.data.frame(setNames(replicate(length(ANCHOR_COLUMNS), character(0), simplify = FALSE),
-                           ANCHOR_COLUMNS))
-  write.table(distances, anchor_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
-  cat(sprintf("anchor distances: %d clonotypes measured in %d anchored lineages\n",
-              nrow(distances), length(anchor_rows)))
+if (!is.null(known_path)) {
+  distances <- if (length(known_rows)) do.call(rbind, known_rows) else
+    as.data.frame(setNames(replicate(length(KNOWN_COLUMNS), character(0), simplify = FALSE),
+                           KNOWN_COLUMNS))
+  write.table(distances, known_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
+  cat(sprintf("known antibody distances: %d clonotypes measured in %d lineages holding a known antibody\n",
+              nrow(distances), length(known_rows)))
 }
 
 write_builders(membership$lineage_id,

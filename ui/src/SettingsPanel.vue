@@ -2,7 +2,7 @@
 import {
   CLUSTERING_MODE_OPTIONS,
   IGPHYML_SCOPE_OPTIONS,
-  effectiveAnchors,
+  effectiveKnown,
   refKey,
 } from "@platforma-open/milaboratories.lineage-trees.model";
 import {
@@ -23,13 +23,13 @@ const clusteringModeOptions = [...CLUSTERING_MODE_OPTIONS];
 const app = useApp();
 
 // Read from data, not outputs, so the option does not flicker while outputs load.
-const hasAnchors = computed(() => effectiveAnchors(app.model.data).length > 0);
+const hasKnown = computed(() => effectiveKnown(app.model.data).length > 0);
 const igPhyMLOptions = computed(() =>
-  IGPHYML_SCOPE_OPTIONS.filter((o) => o.value !== "anchored" || hasAnchors.value),
+  IGPHYML_SCOPE_OPTIONS.filter((o) => o.value !== "known" || hasKnown.value),
 );
-// A pick that leaves no anchor resets "anchored", so the stored scope matches the screen.
+// A pick that leaves no known antibody resets "known", so the stored scope matches the screen.
 const settleScope = () => {
-  if (!hasAnchors.value && app.model.data.igPhyMLScope === "anchored") {
+  if (!hasKnown.value && app.model.data.igPhyMLScope === "known") {
     app.model.data.igPhyMLScope = "none";
   }
 };
@@ -40,19 +40,19 @@ const pickedDatasets = computed({
     settleScope();
   },
 });
-const pickedAnchors = computed({
-  get: () => app.model.data.anchorDatasets,
+const pickedKnown = computed({
+  get: () => app.model.data.knownDatasets,
   set: (refs) => {
-    app.model.data.anchorDatasets = refs;
+    app.model.data.knownDatasets = refs;
     settleScope();
   },
 });
 const advancedOpen = ref(false);
 
-// An anchor set is one of the picked datasets; read from inputOptions so the list comes fast.
+// A known antibody dataset is one of the picked datasets; read from inputOptions so the list comes fast.
 const pickedKeys = computed(() => new Set(app.model.data.datasets.map(refKey)));
-const anchorsOff = computed(() => pickedKeys.value.size < 2);
-const anchorOptions = computed(() =>
+const knownOff = computed(() => pickedKeys.value.size < 2);
+const knownOptions = computed(() =>
   app.model.outputs.inputOptions
     ?.filter((o) => pickedKeys.value.has(refKey(o.ref)))
     .sort((a, b) => refKey(a.ref).localeCompare(refKey(b.ref))),
@@ -84,17 +84,17 @@ const adaptiveNoteOpen = ref(true);
   >
   </PlDropdownMultiRef>
   <PlDropdownMultiRef
-    v-model="pickedAnchors"
-    :options="anchorOptions"
-    :disabled="anchorsOff"
-    label="Anchor datasets"
-    :placeholder="anchorsOff ? 'Pick two or more datasets' : 'None'"
+    v-model="pickedKnown"
+    :options="knownOptions"
+    :disabled="knownOff"
+    label="Known antibody datasets"
+    :placeholder="knownOff ? 'Pick two or more datasets' : 'None'"
   >
     <template #tooltip>
-      Datasets of characterised antibodies whose relatives you are looking for in the others. Their
-      clonotypes are clustered with everything else and marked as anchors: every lineage says how
-      many it holds, and every other member of such a lineage gets its distance along the tree to
-      the nearest anchor, which is exported for ranking.
+      Datasets of antibodies whose relatives you are looking for in the others, such as
+      characterised leads or hits from a screen. Their clonotypes are clustered with everything
+      else: every lineage says how many it holds, and every other member of such a lineage gets its
+      distance along the tree to the nearest known antibody, which is exported for ranking.
     </template>
   </PlDropdownMultiRef>
   <PlAlert v-if="unaligned.length > 0" type="warn">

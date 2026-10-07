@@ -52,7 +52,7 @@ const hasDataset = computed(() => app.model.outputs.treeNodeColumns?.hasDatasetP
 const defaultOptions = computed(
   () =>
     [
-      // Several datasets: tips colored by dataset. Anchors then take the shape, else the color.
+      // Several datasets: tips colored by dataset. Known antibodies then take the shape, else the color.
       ...(hasDataset.value
         ? [
             {
@@ -67,15 +67,15 @@ const defaultOptions = computed(
             },
           ]
         : []),
-      ...(app.model.outputs.treeNodeColumns?.hasAnchorProperty
+      ...(app.model.outputs.treeNodeColumns?.hasKnownProperty
         ? [
             {
               inputName: hasDataset.value ? "nodeShape" : "nodeColor",
               selectedSource: {
                 kind: "PColumn",
-                name: "pl7.app/dendrogram/isAnchor",
+                name: "pl7.app/dendrogram/isKnownAntibody",
                 valueType: "String",
-                annotations: { ...NODE_PROPERTY, "pl7.app/label": "Anchor" },
+                annotations: { ...NODE_PROPERTY, "pl7.app/label": "Known antibody" },
                 axesSpec: [],
               },
             },

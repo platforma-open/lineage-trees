@@ -27,7 +27,7 @@ CHAIN_DOMAIN := "pl7.app/vdj/scClonotypeChain"
 CHAIN_INDEX_DOMAIN := "pl7.app/vdj/scClonotypeChain/index"
 
 // Query name plus dataset position in `args.datasets` (sorted by the model).
-// Bundle anchors "ds0", "ds1" are unrelated to this block's `args.anchorDatasets`.
+// Bundle anchors "ds0", "ds1" are unrelated to this block's `args.knownDatasets`.
 bundleKey := func(name, i) {
 	return name + "." + string(i)
 }
@@ -157,9 +157,9 @@ wf.body(func(args) {
 	datasetCount := len(args.datasets)
 
 	refKey := func(ref) { return ref.blockId + "/" + ref.name }
-	anchorKeys := {}
-	for ref in args.anchorDatasets {
-		anchorKeys[refKey(ref)] = true
+	knownKeys := {}
+	for ref in args.knownDatasets {
+		knownKeys[refKey(ref)] = true
 	}
 
 	// Bulk columns land under "H"; single cell under "A" (heavy) and "B" (light).
@@ -196,7 +196,7 @@ wf.body(func(args) {
 		ll.assert(!is_undefined(clonotypingRunId),
 			"the clonotype axis carries no pl7.app/vdj/clonotypingRunId, so its columns cannot be named apart from another dataset's")
 
-		isAnchor := !is_undefined(anchorKeys[refKey(args.datasets[i])])
+		isKnown := !is_undefined(knownKeys[refKey(args.datasets[i])])
 
 		heavyKey := isSingleCell ? "A" : "H"
 		// Scanned once per column name, not once per lookup.
@@ -317,7 +317,7 @@ wf.body(func(args) {
 			clonotypeAxisSpec: clonotypeAxisSpec,
 			abundanceColumn: abundanceColumn,
 			isSingleCell: isSingleCell,
-			isAnchor: isAnchor,
+			isKnown: isKnown,
 			useLightChains: useLightChains,
 			alignmentSource: alignmentSource,
 			clnsColumn: clnsColumn,
@@ -344,13 +344,13 @@ wf.body(func(args) {
 		datasets[k].label = name
 	}
 
-	// Light chains are resolved if any dataset carries them, anchor sets included;
+	// Light chains are resolved if any dataset carries them, known antibody datasets included;
 	// bulk members then join with the light half unknown.
 	useLightChains := false
-	anyAnchor := false
+	anyKnown := false
 	for ds in datasets {
 		useLightChains = useLightChains || ds.useLightChains
-		anyAnchor = anyAnchor || ds.isAnchor
+		anyKnown = anyKnown || ds.isKnown
 	}
 
 	// Merge prefixes ids with dataset position so datasets sharing samples or presets
@@ -369,7 +369,7 @@ wf.body(func(args) {
 		arg("--out-clonotypes").arg("clonotypes.tsv").
 		arg("--out-abundance").arg("abundance.tsv").
 		arg("--out-annotations").arg("annotations.tsv").
-		arg("--out-anchors").arg("anchors.tsv").
+		arg("--out-known").arg("known.tsv").
 		arg("--out-gene-usage").arg("gene-usage.json")
 	for ds in datasets {
 		idx := string(ds.index)
@@ -379,15 +379,15 @@ wf.body(func(args) {
 			arg("clonotypes-" + idx + ".tsv").
 			arg("abundance-" + idx + ".tsv").
 			arg(ds.label)
-		if ds.isAnchor {
-			mergeCmd.arg("--anchor").arg(idx)
+		if ds.isKnown {
+			mergeCmd.arg("--known").arg(idx)
 		}
 	}
 	merged := mergeCmd.
 		saveFile("clonotypes.tsv").
 		saveFile("abundance.tsv").
 		saveFile("annotations.tsv").
-		saveFile("anchors.tsv").
+		saveFile("known.tsv").
 		saveFileContent("gene-usage.json").
 		saveStdoutContent().
 		printErrStreamToStdout().
@@ -434,7 +434,7 @@ wf.body(func(args) {
 			hasSampleMetadata: !is_undefined(ds.sampleMetadataTable),
 			fromMixcr: ds.alignmentSource == "mixcr",
 			libraryFile: libraryFile,
-			isAnchor: ds.isAnchor,
+			isKnown: ds.isKnown,
 			// Matched against the donor column's axis to find which datasets it reaches.
 			sampleAxis: {
 				name: ds.sampleAxisSpec.name,
@@ -446,9 +446,9 @@ wf.body(func(args) {
 	perDonor := render.createEphemeral(perDonorTpl, {
 		clonotypeTable: clonotypeTable,
 		abundanceTable: abundanceTable,
-		// Dataset names and anchors, read only by collect; the tree step reads anchors alone.
+		// Dataset names and known antibodies, read only by collect; the tree step reads known antibodies alone.
 		annotationsTable: merged.getFile("annotations.tsv"),
-		anchorsTable: merged.getFile("anchors.tsv"),
+		knownTable: merged.getFile("known.tsv"),
 		donorColumn: donorColumnInput,
 		clns: clnsByDataset,
 		libraries: libraryByDataset,
@@ -638,16 +638,16 @@ wf.body(func(args) {
 			}
 		})
 	}
-	if anyAnchor {
+	if anyKnown {
 		lineageStatsColumns = append(lineageStatsColumns, {
-			column: "anchor_count",
-			id: "anchorCount",
+			column: "known_count",
+			id: "knownCount",
 			spec: {
-				name: "pl7.app/clustering/anchorCount",
+				name: "pl7.app/clustering/knownAntibodyCount",
 				valueType: "Int",
 				annotations: {
-					"pl7.app/label": "Anchors in lineage",
-					"pl7.app/description": "Number of the lineage's clonotypes that came from an anchor dataset.",
+					"pl7.app/label": "Known antibodies in lineage",
+					"pl7.app/description": "Number of the lineage's clonotypes that came from a known antibody dataset.",
 					"pl7.app/table/orderPriority": "89950"
 				}
 			}
@@ -1035,12 +1035,12 @@ wf.body(func(args) {
 			{ column: "lineage_id", spec: lineageAxisSpec },
 			{ column: "node_id", spec: nodeAxisSpec }
 		],
-		columns: chainProperties(true) + (useLightChains ? chainProperties(false) : []) + (anyAnchor ? [nodeProperty("is_anchor", {
-			name: "pl7.app/dendrogram/isAnchor",
+		columns: chainProperties(true) + (useLightChains ? chainProperties(false) : []) + (anyKnown ? [nodeProperty("is_known", {
+			name: "pl7.app/dendrogram/isKnownAntibody",
 			valueType: "String",
 			annotations: {
-				"pl7.app/label": "Anchor",
-				"pl7.app/description": "Whether the clonotype at this node came from an anchor dataset.",
+				"pl7.app/label": "Known antibody",
+				"pl7.app/description": "Whether the clonotype at this node came from a known antibody dataset.",
 				"pl7.app/isDiscreteFilter": "true",
 				"pl7.app/discreteValues": "['true', 'false']",
 				// Filled shapes when the graph maps shape to this column; its default palette starts
@@ -1153,19 +1153,19 @@ wf.body(func(args) {
 	germlineMutations := {}
 	expansion := {}
 	memberCounts := {}
-	anchorDistances := {}
-	// AA mutations along the tree to the nearest anchor (chosen by heavy), per chain.
+	knownDistances := {}
+	// AA mutations along the tree to the nearest known antibody (chosen by heavy), per chain.
 	// No NT counts: silent changes say nothing about binding.
-	anchorDistanceColumns := func(ds) {
+	knownDistanceColumns := func(ds) {
 		out := []
 		for chain in useLightChains && ds.isSingleCell ? ["heavy", "light"] : ["heavy"] {
 			isHeavy := chain == "heavy"
 			out = append(out, {
-				column: "anchor_aa_" + chain,
-				id: "anchor.AA." + chain + "." + ds.key,
+				column: "known_aa_" + chain,
+				id: "known.AA." + chain + "." + ds.key,
 				allowNA: true,
 				spec: {
-					name: "pl7.app/vdj/anchorMutationCount",
+					name: "pl7.app/vdj/knownAntibodyMutationCount",
 					valueType: "Int",
 					domain: {
 						"pl7.app/clustering/blockId": blockId,
@@ -1173,9 +1173,9 @@ wf.body(func(args) {
 						"pl7.app/alphabet": "aminoacid"
 					},
 					annotations: {
-						"pl7.app/label": (isHeavy ? "Heavy" : "Light") + " AA mutations to anchor",
+						"pl7.app/label": (isHeavy ? "Heavy" : "Light") + " AA mutations to known antibody",
 						"pl7.app/description": "Amino acid changes on the " + chain +
-							" chain along the tree between this clonotype and the nearest anchor of its lineage, via their common ancestor; positions the reconstruction left unsettled are not counted." +
+							" chain along the tree between this clonotype and the nearest known antibody of its lineage, via their common ancestor; positions the reconstruction left unsettled are not counted." +
 							(isHeavy ? "" : " Blank unless both carry a light chain."),
 						"pl7.app/isScore": "true",
 						"pl7.app/score/rankingOrder": "increasing",
@@ -1188,66 +1188,66 @@ wf.body(func(args) {
 		return out
 	}
 
-	anchorLinks := {}
+	knownLinks := {}
 	for ds in datasets {
 		idx := string(ds.index)
 		// From the abundance column: the clonotype axis carries no trace, so columns of two
 		// datasets would be told apart by nothing.
 		dsTrace := pSpec.makeTrace(ds.abundanceColumn.spec, traceStep)
 
-		// Tree distance to the nearest anchor. Skipped for anchor datasets, where it is blank.
-		if anyAnchor && !ds.isAnchor {
-			maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("anchorDistances-" + idx), "tsv", {
+		// Tree distance to the nearest known antibody. Skipped for known antibody datasets, where it is blank.
+		if anyKnown && !ds.isKnown {
+			maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("knownDistances-" + idx), "tsv", {
 				axes: [{ column: "sequence_id", spec: ds.clonotypeAxisSpec }],
-				columns: anchorDistanceColumns(ds) + [{
-					column: "anchor_id",
-					id: "anchorId." + ds.key,
+				columns: knownDistanceColumns(ds) + [{
+					column: "known_id",
+					id: "knownId." + ds.key,
 					allowNA: true,
 					spec: {
-						name: "pl7.app/vdj/anchorId",
+						name: "pl7.app/vdj/knownAntibodyId",
 						valueType: "String",
 						domain: { "pl7.app/clustering/blockId": blockId },
 						annotations: {
-							"pl7.app/label": "Nearest anchor",
-							"pl7.app/description": "The anchor clonotype the mutation count is measured to: its Clone Id where the producer gives one, else its id.",
+							"pl7.app/label": "Nearest known antibody",
+							"pl7.app/description": "The known antibody clonotype the mutation count is measured to: its Clone Id where the producer gives one, else its id.",
 							"pl7.app/table/fontFamily": "monospace",
 							"pl7.app/table/orderPriority": "86400"
 						}
 					}
 				}]
-			}, { splitDataAndSpec: true })), func(key, value) { anchorDistances[key] = value })
+			}, { splitDataAndSpec: true })), func(key, value) { knownDistances[key] = value })
 
-			// Not exported for now: downstream tables reach the anchor's columns through this link
+			// Not exported for now: downstream tables reach the known antibody's columns through this link
 			// without saying so, and repeat the lineage columns. Back once the SDK can label every
 			// column reached through a linker and stop discovery at it.
-//			// Links a candidate to its anchor's columns, one per dataset pair since anchor
-//			// sets may share ids. Anchor axis first: links run from the second group to the first.
-//			for anchorDs in datasets {
-//				if !anchorDs.isAnchor || anchorDs.index == ds.index {
+//			// Links a candidate to its known antibody's columns, one per dataset pair since known antibody
+//			// sets may share ids. Known antibody axis first: links run from the second group to the first.
+//			for knownDs in datasets {
+//				if !knownDs.isKnown || knownDs.index == ds.index {
 //					continue
 //				}
-//				pair := idx + "-" + string(anchorDs.index)
-//				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("anchorLinks-" + pair), "tsv", {
+//				pair := idx + "-" + string(knownDs.index)
+//				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("knownLinks-" + pair), "tsv", {
 //					axes: [
-//						{ column: "anchor_id", spec: anchorDs.clonotypeAxisSpec },
+//						{ column: "known_id", spec: knownDs.clonotypeAxisSpec },
 //						{ column: "sequence_id", spec: ds.clonotypeAxisSpec }
 //					],
 //					columns: [{
 //						column: "link",
-//						id: "anchorLink." + ds.key + "." + anchorDs.key,
+//						id: "knownLink." + ds.key + "." + knownDs.key,
 //						spec: {
-//							name: "pl7.app/vdj/nearestAnchor",
+//							name: "pl7.app/vdj/nearestKnownAntibody",
 //							valueType: "Int",
 //							domain: { "pl7.app/clustering/blockId": blockId },
 //							annotations: {
 //								"pl7.app/isLinkerColumn": "true",
-//								"pl7.app/linkLabel": "Anchor",
-//								"pl7.app/label": "Nearest anchor",
-//								"pl7.app/description": "Links a clonotype to the anchor its mutation count is measured to, so the anchor's own columns can be read beside it."
+//								"pl7.app/linkLabel": "Known antibody",
+//								"pl7.app/label": "Nearest known antibody",
+//								"pl7.app/description": "Links a clonotype to the known antibody its mutation count is measured to, so the known antibody's own columns can be read beside it."
 //							}
 //						}
 //					}]
-//				}, { splitDataAndSpec: true })), func(key, value) { anchorLinks[key] = value })
+//				}, { splitDataAndSpec: true })), func(key, value) { knownLinks[key] = value })
 //			}
 		}
 
@@ -1416,7 +1416,7 @@ wf.body(func(args) {
 	}, { splitDataAndSpec: true }))
 
 	// Exported as context and filters only: none is isScore, so none becomes a ranking key.
-	EXPORTED_LINEAGE_STATS := { clusterSize: true, anchorCount: true }
+	EXPORTED_LINEAGE_STATS := { clusterSize: true, knownCount: true }
 
 	exportsBuilder := pframes.pFrameBuilder()
 	addExport := add(exportsBuilder)
@@ -1428,8 +1428,8 @@ wf.body(func(args) {
 		}
 	})
 	maps.forEach(germlineMutations, add(exportsBuilder))
-	maps.forEach(anchorDistances, add(exportsBuilder))
-//	maps.forEach(anchorLinks, add(exportsBuilder))
+	maps.forEach(knownDistances, add(exportsBuilder))
+//	maps.forEach(knownLinks, add(exportsBuilder))
 
 	// Each basket as a subset of each dataset it has clonotypes in, which lead selection offers as a filter.
 	// Built from args alone, so a basket edit reruns none of the stages.
@@ -1475,7 +1475,7 @@ wf.body(func(args) {
 			runId: ds.key,
 			modality: ds.isSingleCell ? "paired-sc" : "bulk-heavy",
 			alignmentSource: ds.alignmentSource,
-			isAnchor: ds.isAnchor
+			isKnown: ds.isKnown
 		})
 	}
 

@@ -96,7 +96,7 @@ def main(tmp: Path) -> None:
     merged, abundance = tmp / "merged.tsv", tmp / "abundance.tsv"
     stage("merge", "--dataset", "0", ds0, ab0, "mixcr", "--dataset", "1", ds1, ab1, "imported",
           "--out-clonotypes", merged, "--out-abundance", abundance,
-          "--out-annotations", tmp / "annotations.tsv", "--out-anchors", tmp / "anchors.tsv",
+          "--out-annotations", tmp / "annotations.tsv", "--out-known", tmp / "known.tsv",
           "--out-gene-usage", tmp / "gene-usage.json")
     stage("split", "--clonotypes", merged, "--abundance", abundance, "--donors", donors_tsv,
           "--out-dir", tmp / "split", *donor_args)
@@ -145,8 +145,8 @@ def main(tmp: Path) -> None:
 
     print("== collect ==")
     merged_columns = read(merged).columns
-    ok("merge keeps dataset names and anchors out of the table the early steps read",
-       "data_source" not in merged_columns and "is_anchor" not in merged_columns
+    ok("merge keeps dataset names and known antibodies out of the table the early steps read",
+       "data_source" not in merged_columns and "is_known" not in merged_columns
        and set(read(tmp / "annotations.tsv")["data_source"]) == {"mixcr", "imported"})
     usage = json.loads((tmp / "gene-usage.json").read_text())
     merged_rows = read(merged)
@@ -157,9 +157,9 @@ def main(tmp: Path) -> None:
             expected[ds][first_gene(call)] = expected[ds].get(first_gene(call), 0) + 1
     ok("merge counts each dataset's clonotypes per V gene, alleles dropped",
        {ds: u.get("v", {}) for ds, u in usage.items()} == expected)
-    ok("the tree step's anchors file carries no dataset names, and no rows without anchors",
-       list(read(tmp / "anchors.tsv").columns) == ["sequence_id", "is_anchor"]
-       and read(tmp / "anchors.tsv").empty)
+    ok("the tree step's known antibodies file carries no dataset names, and no rows without known antibodies",
+       list(read(tmp / "known.tsv").columns) == ["sequence_id", "is_known"]
+       and read(tmp / "known.tsv").empty)
     ok("collect joins them back: lineages name their data source",
        set(read(tmp / "lineage-stats.tsv")["data_source"]) >= {"mixcr"})
     # The UI reads the last "[==PROGRESS==]" line: a rising percentage, ending at 100%.
@@ -271,10 +271,10 @@ def main(tmp: Path) -> None:
        member_stats.loc["L1", "no_tree_reason"] == why and member_stats.loc["L1", "tip_count"] == "0"
        and member_stats.loc["L2", "tip_count"] == "1" and member_stats.loc["L2", "no_tree_reason"] == "")
 
-    # "Nearest anchor" shows the anchor's Clone Id where it has one, else its id; the links
-    # keep the id, since it keys the anchor's axis.
-    anc = tmp / "anchor-collect"
-    for d in ("lineages", "nodes", "node-links", "anchor-distances", "out"):
+    # "Nearest known antibody" shows the known antibody's Clone Id where it has one, else its id; the links
+    # keep the id, since it keys the known antibody's axis.
+    anc = tmp / "known-collect"
+    for d in ("lineages", "nodes", "node-links", "known-distances", "out"):
         (anc / d).mkdir(parents=True)
     write(anc / "lineages" / "donor-0.tsv", [
         {"sequence_id": s, "lineage_id": "L1", "link": 1, "group_id": s}
@@ -283,20 +283,20 @@ def main(tmp: Path) -> None:
                                            "is_observed": "true", "label": "0_a", "node_depth": "1"}])
     write(anc / "node-links" / "donor-0.tsv", [{"lineage_id": "L1", "node_id": "1",
                                                 "sequence_id": "0_a", "link": 1, "is_representative": "true"}])
-    blank = {"anchor_nt_heavy": 0, "anchor_aa_light": "", "anchor_nt_light": ""}
-    write(anc / "anchor-distances" / "donor-0.tsv", [
-        {"sequence_id": "0_a", "anchor_id": "1_x", "anchor_aa_heavy": 2, **blank},
-        {"sequence_id": "0_b", "anchor_id": "1_y", "anchor_aa_heavy": 3, **blank}])
+    blank = {"known_nt_heavy": 0, "known_aa_light": "", "known_nt_light": ""}
+    write(anc / "known-distances" / "donor-0.tsv", [
+        {"sequence_id": "0_a", "known_id": "1_x", "known_aa_heavy": 2, **blank},
+        {"sequence_id": "0_b", "known_id": "1_y", "known_aa_heavy": 3, **blank}])
     stage("collect", "--lineages-dir", anc / "lineages", "--nodes-dir", anc / "nodes",
-          "--node-links-dir", anc / "node-links", "--anchor-distances-dir", anc / "anchor-distances",
+          "--node-links-dir", anc / "node-links", "--known-distances-dir", anc / "known-distances",
           "--clonotypes", write(anc / "clonotypes.tsv", [
               {"sequence_id": "0_a", "clone_label": "7"}, {"sequence_id": "0_b", "clone_label": ""},
               {"sequence_id": "1_x", "clone_label": "42"}, {"sequence_id": "1_y", "clone_label": ""}]),
-          "--dataset", "0", "--dataset", "1", "--anchor", "1", "--per-dataset-dir", anc / "out",
+          "--dataset", "0", "--dataset", "1", "--known", "1", "--per-dataset-dir", anc / "out",
           "--out-nodes", anc / "nodes.tsv", "--out-lineage-stats", anc / "stats.tsv")
-    nearest = dict(zip(*read(anc / "out" / "anchor-distances-0.tsv")[["sequence_id", "anchor_id"]].T.values))
-    linked = sorted(read(anc / "out" / "anchor-links-0-1.tsv")["anchor_id"])
-    ok("nearest anchor shows the anchor's Clone Id, else its id; links keep the id",
+    nearest = dict(zip(*read(anc / "out" / "known-distances-0.tsv")[["sequence_id", "known_id"]].T.values))
+    linked = sorted(read(anc / "out" / "known-links-0-1.tsv")["known_id"])
+    ok("nearest known antibody shows the known antibody's Clone Id, else its id; links keep the id",
        nearest == {"a": "42", "b": "y"} and linked == ["x", "y"])
 
     # The full method compares rows base by base, so padding must not read as a difference:

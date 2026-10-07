@@ -163,7 +163,7 @@ self.body(func(inputs) {
 		prep: ["clonotypes", "aligned", "route", "alignLog", "allelesLog"],
 		cluster: ["clones", "method", "log"],
 		trees: ["lineages", "nodes", "nodeLinks", "builders", "germlineMutations",
-			"anchorDistances", "treesLog", "log"],
+			"knownDistances", "treesLog", "log"],
 		collect: ["nodes", "lineageStats", "nodeProperties", "nodeMetadata", "nodeAbundance",
 			"donorStats", "runId", "treesLog", "log", "perDataset"]
 	}
@@ -239,7 +239,7 @@ self.body(func(inputs) {
 			clonotypes: prep.clonotypes,
 			clones: cluster.clones,
 			aligned: prep.aligned,
-			anchors: inputs.anchorsTable,
+			known: inputs.knownTable,
 			params: treeParams
 		}))
 
@@ -260,7 +260,7 @@ self.body(func(inputs) {
 		if ds.hasSampleMetadata {
 			sampleMetadata[ds.index] = inputs.sampleMetadata[ds.index]
 		}
-		collectDatasets = append(collectDatasets, { index: ds.index, isAnchor: ds.isAnchor })
+		collectDatasets = append(collectDatasets, { index: ds.index, isKnown: ds.isKnown })
 	}
 	collected := outputsOf("collect", render.create(collectTpl, {
 		abundance: inputs.abundanceTable,
@@ -294,14 +294,14 @@ self.body(func(inputs) {
 	}
 	for ds in params.datasets {
 		idx := ds.index
-		for key in ["lineages", "nodeLinks", "germlineMutations", "expansion", "memberCounts", "anchorDistances"] {
+		for key in ["lineages", "nodeLinks", "germlineMutations", "expansion", "memberCounts", "knownDistances"] {
 			outputs[key + "-" + idx] = collected.perDataset.getFutureInputField(key + "-" + idx)
 		}
-		// Per dataset pair: an anchor id only means something with its issuing dataset.
-		for anchorDs in params.datasets {
-			if anchorDs.isAnchor && anchorDs.index != idx {
-				pair := idx + "-" + anchorDs.index
-				outputs["anchorLinks-" + pair] = collected.perDataset.getFutureInputField("anchorLinks-" + pair)
+		// Per dataset pair: a known antibody id only means something with its issuing dataset.
+		for knownDs in params.datasets {
+			if knownDs.isKnown && knownDs.index != idx {
+				pair := idx + "-" + knownDs.index
+				outputs["knownLinks-" + pair] = collected.perDataset.getFutureInputField("knownLinks-" + pair)
 			}
 		}
 	}

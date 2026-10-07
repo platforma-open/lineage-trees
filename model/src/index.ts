@@ -69,13 +69,13 @@ function currentViews<V extends { runKey?: string }>(
   return (views ?? []).filter((view) => isCurrent(view, runKey));
 }
 
-// "Anchor" means a characterised antibody dataset. SDK anchors appear only as the bundle's "ds0", "ds1".
+// "Known antibodies": datasets the user marks to measure relatives against. SDK anchors appear only as the bundle's "ds0", "ds1".
 
 export type BlockData = {
   /** Upstream clonotyping datasets in picker order; `args` sorts them. */
   datasets: PlRef[];
-  /** Anchor sets. Their members survive tree filters and set each member's tree distance. `args` drops refs not in `datasets`. */
-  anchorDatasets: PlRef[];
+  /** Known antibody datasets. Their members survive tree filters and set each member's tree distance. `args` drops refs not in `datasets`. */
+  knownDatasets: PlRef[];
   /** Sample metadata naming each sample's donor. Clustering never crosses donors. */
   donorColumn?: PlRef;
   /** `fixed`: single linkage per V, J and CDR3 length class. `adaptive`: HILARy's full method, human only. */
@@ -86,7 +86,7 @@ export type BlockData = {
   precision: number;
   /** Adaptive mode: desired sensitivity, HILARy's default 0.9. */
   sensitivity: number;
-  /** Larger lineages are subsampled to this, anchors kept. Left-out clonotypes lose only tree columns. */
+  /** Larger lineages are subsampled to this, known antibodies kept. Left-out clonotypes lose only tree columns. */
   maxTipsPerTree?: number;
   /** Smaller lineages get no tree. Unset means the floor of two. */
   minTipsPerTree?: number;
@@ -161,7 +161,7 @@ export const DEFAULT_SENSITIVITY = 0.9;
 type BlockDataV1 = Omit<
   BlockData,
   | "datasets"
-  | "anchorDatasets"
+  | "knownDatasets"
   | "igPhyMLScope"
   | "clusteringMode"
   | "precision"
@@ -176,11 +176,17 @@ type BlockDataV1 = Omit<
   overviewTableState: PlDataTableStateV2;
 };
 
-export type IgPhyMLScope = "none" | "anchored" | "all";
+export type IgPhyMLScope = "none" | "known" | "all";
+
+/** Data shape before "anchor" was renamed to "known antibody". */
+type BlockDataV2 = Omit<BlockData, "knownDatasets" | "igPhyMLScope"> & {
+  anchorDatasets: PlRef[];
+  igPhyMLScope: "none" | "anchored" | "all";
+};
 
 export const IGPHYML_SCOPE_OPTIONS = [
   { value: "none", label: "None (FastTree and RAxML for every lineage)" },
-  { value: "anchored", label: "Lineages holding an anchor" },
+  { value: "known", label: "Lineages holding a known antibody" },
   { value: "all", label: "Every lineage" },
 ] as const satisfies readonly { value: IgPhyMLScope; label: string }[];
 
@@ -188,7 +194,7 @@ export type BlockArgs = {
   /** Sorted and deduplicated, so reordering the picker changes nothing. */
   datasets: PlRef[];
   /** Sorted, and only refs that are also in `datasets`. */
-  anchorDatasets: PlRef[];
+  knownDatasets: PlRef[];
   donorColumn?: PlRef;
   clusteringMode: ClusteringMode;
   clusteringThreshold: number;
@@ -263,7 +269,7 @@ export type DatasetRun = {
   runId: string;
   modality: Modality;
   alignmentSource: AlignmentSource;
-  isAnchor: boolean;
+  isKnown: boolean;
 };
 
 const RUN_ID_DOMAIN = "pl7.app/vdj/clonotypingRunId";
@@ -326,15 +332,15 @@ function axisKey(axis: AxisSpec): string {
   return JSON.stringify([id.name, domain]);
 }
 
-/** One string per ref, for sets and maps; the workflow keys anchors the same way. */
+/** One string per ref, for sets and maps; the workflow keys known antibodies the same way. */
 export const refKey = (ref: PlRef) => `${ref.blockId}/${ref.name}`;
 
-/** Picked anchor sets, deduplicated and sorted; none with one dataset. Shared by args and settings. */
-export function effectiveAnchors(data: Pick<BlockData, "datasets" | "anchorDatasets">): PlRef[] {
+/** Picked known antibody datasets, deduplicated and sorted; none with one dataset. Shared by args and settings. */
+export function effectiveKnown(data: Pick<BlockData, "datasets" | "knownDatasets">): PlRef[] {
   const datasets = canonicalRefs(data.datasets ?? []);
   if (datasets.length < 2) return [];
   const picked = new Set(datasets.map(refKey));
-  return canonicalRefs(data.anchorDatasets ?? []).filter((ref) => picked.has(refKey(ref)));
+  return canonicalRefs(data.knownDatasets ?? []).filter((ref) => picked.has(refKey(ref)));
 }
 
 function canonicalRefs(refs: PlRef[]): PlRef[] {
@@ -478,7 +484,7 @@ export function defaultSubtitle(data: BlockData): string {
     (data.clusteringMode ?? "fixed") === "adaptive"
       ? [`HILARy adaptive, precision ${data.precision}`, `sensitivity ${data.sensitivity}`]
       : [`HILARy fixed, threshold ${data.clusteringThreshold}`];
-  if (data.igPhyMLScope === "anchored") parts.push("IgPhyML on anchored lineages");
+  if (data.igPhyMLScope === "known") parts.push("IgPhyML on lineages holding a known antibody");
   if (data.igPhyMLScope === "all") parts.push("IgPhyML on all lineages");
   if (data.maxTipsPerTree !== undefined) parts.push(`max ${data.maxTipsPerTree} tips`);
   return parts.join(", ");
@@ -490,7 +496,7 @@ export function defaultBlockData(
 ): BlockData {
   return {
     datasets: [],
-    anchorDatasets: [],
+    knownDatasets: [],
     igPhyMLScope: "none",
     clusteringMode: "fixed",
     precision: DEFAULT_PRECISION,
@@ -516,7 +522,7 @@ export function defaultBlockData(
 const dataModel = new DataModelBuilder({ kind })
   .from<BlockDataV1>("v1")
   // v2: dataset becomes a list, IgPhyML switch a scope; two old fields dropped.
-  .migrate<BlockData>(
+  .migrate<BlockDataV2>(
     "v2",
     ({ inputAnchor, useIgPhyML, useLightChains: _l, overviewTableState: _, ...rest }) => ({
       ...rest,
@@ -529,6 +535,12 @@ const dataModel = new DataModelBuilder({ kind })
       sequencesOfInterest: [],
     }),
   )
+  // v3: "anchor" renamed to "known antibody".
+  .migrate<BlockData>("v3", ({ anchorDatasets, igPhyMLScope, ...rest }) => ({
+    ...rest,
+    knownDatasets: anchorDatasets,
+    igPhyMLScope: igPhyMLScope === "anchored" ? "known" : igPhyMLScope,
+  }))
   .init(({ params }) => defaultBlockData(params?.clusteringThreshold));
 
 export const platforma = BlockModelV3.create({ dataModel, kind })
@@ -538,8 +550,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     // The platform shows no reason when this throws, so the UI reads the same check (settingsProblem).
     const problem = settingsProblem(data);
     if (problem !== undefined) throw new Error(problem);
-    // Anchor refs no longer in `datasets` are dropped rather than failing the run.
-    const anchorDatasets = effectiveAnchors(data);
+    // Known antibody refs no longer in `datasets` are dropped rather than failing the run.
+    const knownDatasets = effectiveKnown(data);
     const clusteringMode = data.clusteringMode ?? "fixed";
     // Unset means no cap and a floor of two.
     const maxTipsPerTree = data.maxTipsPerTree;
@@ -556,13 +568,13 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       maxTipsPerTree,
       minTipsPerTree,
       sequencesOfInterest,
-      // "anchored" without anchors builds no IgPhyML tree but labels distances as mixed.
+      // "known" without known antibodies builds no IgPhyML tree but labels distances as mixed.
       igPhyMLScope:
-        data.igPhyMLScope === "anchored" && anchorDatasets.length === 0
+        data.igPhyMLScope === "known" && knownDatasets.length === 0
           ? "none"
           : (data.igPhyMLScope ?? "none"),
       datasets,
-      anchorDatasets,
+      knownDatasets,
       // Absent means one donor; the workflow treats it as a single group.
       donorColumn: data.donorColumn,
       clusteringMode,
@@ -944,9 +956,9 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       )?.id,
       lineageAxis: getAxisId(topology.spec.axesSpec[0]),
       nodeAxis: getAxisId(topology.spec.axesSpec[1]),
-      // The tree page colours tips by anchor when set.
-      hasAnchorProperty: nodeScoped.some(
-        (column) => column.spec.name === "pl7.app/dendrogram/isAnchor",
+      // The tree page colours tips by known antibody when set.
+      hasKnownProperty: nodeScoped.some(
+        (column) => column.spec.name === "pl7.app/dendrogram/isKnownAntibody",
       ),
       // Emitted only on runs over several datasets; the tree page colours tips by it.
       hasDatasetProperty: nodeScoped.some(

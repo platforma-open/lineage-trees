@@ -19,7 +19,7 @@ DIRS := {
 	nodeLinks: "node-links",
 	builders: "builders",
 	germlineMutations: "germline-mutations",
-	anchorDistances: "anchor-distances"
+	knownDistances: "known-distances"
 }
 
 // Per-dataset tables, by output key prefix and file name prefix.
@@ -29,7 +29,7 @@ PER_DATASET := {
 	"germlineMutations": "germline-mutations",
 	"expansion": "expansion",
 	"memberCounts": "member-counts",
-	"anchorDistances": "anchor-distances"
+	"knownDistances": "known-distances"
 }
 
 self.defineOutputs("nodes", "lineageStats", "nodeProperties", "nodeMetadata", "nodeAbundance",
@@ -61,7 +61,7 @@ self.body(func(inputs) {
 		arg("--node-links-dir").arg("node-links").
 		arg("--builders-dir").arg("builders").
 		arg("--germline-mutations-dir").arg("germline-mutations").
-		arg("--anchor-distances-dir").arg("anchor-distances").
+		arg("--known-distances-dir").arg("known-distances").
 		arg("--abundance").arg("abundance.tsv").
 		arg("--out-nodes").arg("nodes.tsv").
 		arg("--out-lineage-stats").arg("lineage-stats.tsv").
@@ -73,8 +73,8 @@ self.body(func(inputs) {
 	for ds in params.datasets {
 		collectCmd.arg("--dataset").arg(ds.index)
 		// So link files exist for every picked pair, even ones the data leaves empty.
-		if ds.isAnchor {
-			collectCmd.arg("--anchor").arg(ds.index)
+		if ds.isKnown {
+			collectCmd.arg("--known").arg(ds.index)
 		}
 	}
 	maps.forEach(inputs.sampleMetadata, func(index, file) {
@@ -106,10 +106,10 @@ self.body(func(inputs) {
 		maps.forEach(PER_DATASET, func(key, name) {
 			perDatasetFiles[key + "-" + idx] = "per-dataset/" + name + "-" + idx + ".tsv"
 		})
-		for anchorDs in params.datasets {
-			if anchorDs.isAnchor && anchorDs.index != idx {
-				pair := idx + "-" + anchorDs.index
-				perDatasetFiles["anchorLinks-" + pair] = "per-dataset/anchor-links-" + pair + ".tsv"
+		for knownDs in params.datasets {
+			if knownDs.isKnown && knownDs.index != idx {
+				pair := idx + "-" + knownDs.index
+				perDatasetFiles["knownLinks-" + pair] = "per-dataset/known-links-" + pair + ".tsv"
 			}
 		}
 	}

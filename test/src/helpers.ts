@@ -267,8 +267,8 @@ export async function runLineageTrees(
   opts: {
     /** Upstream block ids whose datasets to pick, in order. */
     from: string[];
-    /** Upstream block ids whose datasets are anchor sets. */
-    anchors?: string[];
+    /** Upstream block ids whose datasets are known antibody datasets. */
+    known?: string[];
     /** Upstream block id and label of the donor metadata column. */
     donor?: { blockId: string; label: string };
     data?: Partial<BlockData>;
@@ -283,7 +283,7 @@ export async function runLineageTrees(
   expect(erroredOutputs(before), label).toEqual([]);
   const options = value<{ ref: PlRef; label: string }[]>(before, "inputOptions");
   const datasets = opts.from.map((id) => pickOption(ctx, options, id));
-  const anchorDatasets = (opts.anchors ?? []).map((id) => pickOption(ctx, options, id));
+  const knownDatasets = (opts.known ?? []).map((id) => pickOption(ctx, options, id));
   const donorColumn =
     opts.donor === undefined
       ? undefined
@@ -296,7 +296,7 @@ export async function runLineageTrees(
 
   await project.mutateBlockStorage(blockId, {
     operation: "update-block-data",
-    value: lineageData({ ...opts.data, datasets, anchorDatasets, donorColumn }),
+    value: lineageData({ ...opts.data, datasets, knownDatasets, donorColumn }),
   });
   if (datasets.length === 0) return await stableOutputs(ctx, blockId);
 

@@ -18,7 +18,7 @@ import {
 
 const TIMEOUT = 2_400_000;
 
-type TreeNodeColumns = { hasAnchorProperty: boolean; topologyId: string };
+type TreeNodeColumns = { hasKnownProperty: boolean; topologyId: string };
 
 function expectTrees({ expect }: TestCtx, outputs: Outputs, label?: string) {
   expect(value(outputs, "noTreesReason"), label).toBeUndefined();
@@ -51,18 +51,20 @@ blockTest("no datasets picked", { timeout: 120_000 }, async ({ rawPrj, helpers, 
 });
 
 blockTest(
-  "alpaca twice, one an anchor set",
+  "alpaca twice, one a known antibody dataset",
   { timeout: TIMEOUT },
   async ({ rawPrj, helpers, expect, ml }) => {
     const ctx = { rawPrj, helpers, expect, ml };
     const { mixcrBlockIds } = await alpacaClonotyped(ctx, 2);
     const outputs = await runLineageTrees(ctx, {
       from: mixcrBlockIds,
-      anchors: [mixcrBlockIds[0]],
+      known: [mixcrBlockIds[0]],
     });
     expectTrees(ctx, outputs);
-    ctx.expect(value<TreeNodeColumns>(outputs, "treeNodeColumns")?.hasAnchorProperty).toBe(true);
-    ctx.expect(value<string>(outputs, "modeStatement")).toContain("1 dataset as anchor sets");
+    ctx.expect(value<TreeNodeColumns>(outputs, "treeNodeColumns")?.hasKnownProperty).toBe(true);
+    ctx
+      .expect(value<string>(outputs, "modeStatement"))
+      .toContain("1 dataset as known antibody datasets");
   },
 );
 

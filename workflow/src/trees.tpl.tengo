@@ -17,12 +17,12 @@ FILES := {
 	nodeLinks: "node-links.tsv",
 	builders: "builders.tsv",
 	germlineMutations: "germline-mutations.tsv",
-	anchorDistances: "anchor-distances.tsv",
+	knownDistances: "known-distances.tsv",
 	treesLog: "trees.log"
 }
 
 self.defineOutputs("lineages", "nodes", "nodeLinks", "builders", "germlineMutations",
-	"anchorDistances", "treesLog", "log")
+	"knownDistances", "treesLog", "log")
 
 self.body(func(inputs) {
 	params := inputs.params
@@ -45,7 +45,7 @@ self.body(func(inputs) {
 		addFile("clonotypes.tsv", inputs.clonotypes).
 		addFile("clones.tsv", inputs.clones).
 		addFile("aligned.tsv", inputs.aligned, { tag: "aligned" }).
-		addFile("annotations.tsv", inputs.anchors).
+		addFile("annotations.tsv", inputs.known).
 		arg("--stage").arg("trees").
 		arg("--annotations").arg("annotations.tsv").
 		arg("--clonotypes").arg("clonotypes.tsv").
@@ -59,7 +59,7 @@ self.body(func(inputs) {
 		arg("--out-node-links").arg("node-links.tsv").
 		arg("--out-builders").arg("builders.tsv").
 		arg("--out-germline-mutations").arg("germline-mutations.tsv").
-		arg("--out-anchor-distances").arg("anchor-distances.tsv").
+		arg("--out-known-distances").arg("known-distances.tsv").
 		saveStdoutStream().
 		printErrStreamToStdout()
 	for name in maps.getKeys(FILES) {
