@@ -1,0 +1,309 @@
+// Per-donor alleles, alignment, clustering and trees; no lineage spans donors.
+// Ephemeral: the donor count is data. It only dispatches: the work runs in pure stage templates
+// whose outputs the block keeps. Ids are position-prefixed; `collect` splits datasets back out.
+
+self := import("@platforma-sdk/workflow-tengo:tpl")
+
+exec := import("@platforma-sdk/workflow-tengo:exec")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+maps := import("@platforma-sdk/workflow-tengo:maps")
+ll := import("@platforma-sdk/workflow-tengo:ll")
+render := import("@platforma-sdk/workflow-tengo:render")
+pcolumn := import("@platforma-sdk/workflow-tengo:pframes.pcolumn")
+text := import("text")
+json := import("json")
+
+hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.hilary:main")
+mixcrSw := assets.importSoftware("@platforma-open/milaboratories.software-mixcr:memory-from-limits")
+
+// Pure stages, split where the settings split, so a change reruns only its stage and later ones.
+prepTpl := assets.importTemplate(":prep")
+clusterTpl := assets.importTemplate(":cluster")
+treesTpl := assets.importTemplate(":trees")
+collectTpl := assets.importTemplate(":collect")
+
+// Formulas read a tagged input's size at exec time, so requests follow each donor's data.
+f := exec.formula
+
+self.awaitState("params", "ResourceReady")
+// InputsLocked: per-sample file refs must be iterable, but content is not read here.
+self.awaitState("clns", { wildcard: "*" }, "InputsLocked")
+// Null resource when no donor column is picked.
+self.awaitState("donorColumn", "ResourceReady")
+// The tables are only handed on, so they are not awaited: waiting would make the merge run
+// even when every stage is recovered.
+
+// Same prefix `merge` put on every id.
+prefixed := func(index, id) {
+	return index + "_" + id
+}
+
+// Name plus sorted domain; tells whether the donor column and a dataset share samples.
+axisKey := func(axis) {
+	key := axis.name
+	domain := is_undefined(axis.domain) ? {} : axis.domain
+	for k in maps.getKeys(domain) {
+		key += "|" + k + "=" + domain[k]
+	}
+	return key
+}
+
+self.body(func(inputs) {
+	params := inputs.params
+
+	// With no donor column the whole input is one unnamed group.
+	donors := []
+	sampleToDonor := {}
+	donorsTsv := ""
+	if params.hasDonorColumn {
+		// Datasets on another sample axis get no donor and skip clustering; `split` counts them and the model warns.
+		donorAxisKey := axisKey(inputs.donorColumn.spec.axesSpec[0])
+		covered := []
+		for ds in params.datasets {
+			if axisKey(ds.sampleAxis) == donorAxisKey {
+				covered = append(covered, ds.index)
+			}
+		}
+
+		// Strip tabs and newlines once, so every use of a donor name matches and no value shifts a column.
+		clean := func(v) { return text.replace(text.replace(v, "\t", " ", -1), "\n", " ", -1) }
+		donorSet := {}
+		for key, value in inputs.donorColumn.data.getDataAsJson()["data"] {
+			// Metadata may be numeric; donors are named and compared as text throughout.
+			// No value or a blank one is no donor: the sample is left out, as the model warns.
+			if is_undefined(value) {
+				continue
+			}
+			donor := text.trim_space(clean(is_string(value) ? value : string(value)))
+			if donor == "" {
+				continue
+			}
+			sample := json.decode(key)[0]
+			for index in covered {
+				sampleToDonor[prefixed(index, sample)] = donor
+			}
+			donorSet[donor] = true
+		}
+		// Sorted, so two equivalent runs build the same graph and dedup.
+		donors = maps.getKeys(donorSet)
+		// Otherwise every group would be named by an undefined donor. The model warns before the run.
+		if len(donors) == 0 {
+			ll.panic("No sample in the picked datasets has a value in the donor column, so nothing can be clustered. Fill in the donor column or clear it.")
+		}
+
+		donorsTsv = "sample_id\tdonor\n"
+		for sample in maps.getKeys(sampleToDonor) {
+			donorsTsv += clean(sample) + "\t" + sampleToDonor[sample] + "\n"
+		}
+	}
+	groupCount := len(donors) == 0 ? 1 : len(donors)
+	groupName := func(i) { return params.hasDonorColumn ? donors[i] : "all samples" }
+	inGroup := func(i, sample) { return !params.hasDonorColumn || sampleToDonor[sample] == donors[i] }
+
+	// Live stdout of each donor's long stages, for per-donor progress bars.
+	allelesLogs := pcolumn.resourceMapBuilder(1)
+	alignmentsLogs := pcolumn.resourceMapBuilder(1)
+	clusteringLogs := pcolumn.resourceMapBuilder(1)
+	treesLogs := pcolumn.resourceMapBuilder(1)
+	clusteringMethods := pcolumn.resourceMapBuilder(1)
+	// "tigger" or "reference" and why, as JSON reported by the allele stage.
+	alleleRoutes := pcolumn.resourceMapBuilder(1)
+
+	// Per-donor files are numbered, not named: donor names are arbitrary text.
+
+	splitCmd := exec.builder().
+		software(hilarySw).
+		// Measured at about 2.2x its inputs, like merge.
+		resources({
+			onCPU: {
+				cpu: 1,
+				ram: f.size("splitInput").times(4).plus(f.mib(512)).
+					between(f.gib(1), f.gib(256)).staticFallback(f.gib(4))
+			}
+		}).
+		addFile("clonotypes.tsv", inputs.clonotypeTable, { tag: "splitInput" }).
+		addFile("abundance.tsv", inputs.abundanceTable, { tag: "splitInput" }).
+		arg("split").
+		arg("--clonotypes").arg("clonotypes.tsv").
+		arg("--abundance").arg("abundance.tsv").
+		arg("--out-dir").arg("split")
+
+	if params.hasDonorColumn {
+		splitCmd.writeFile("donors.tsv", donorsTsv)
+		splitCmd.arg("--donors").arg("donors.tsv")
+		for donor in donors {
+			splitCmd.arg("--donor").arg(donor)
+		}
+	}
+	for i := 0; i < groupCount; i++ {
+		splitCmd.saveFile("split/donor-" + string(i) + ".tsv")
+	}
+	split := splitCmd.saveStdoutContent().printErrStreamToStdout().run()
+
+	allClns := []
+	for ds in params.datasets {
+		if !ds.fromMixcr {
+			continue
+		}
+		idx := ds.index
+		maps.forEach(inputs.clns[idx].inputs(), func(key, clnsFile) {
+			sample := json.decode(key)[0]
+			allClns = append(allClns, {
+				idx: idx,
+				libraryFile: ds.libraryFile,
+				sample: prefixed(idx, sample),
+				// One directory level only: the working directory filler cannot nest.
+				name: "ds" + idx + "__" + sample,
+				file: clnsFile
+			})
+		})
+	}
+
+	stageNames := {
+		prep: ["clonotypes", "aligned", "route", "alignLog", "allelesLog"],
+		cluster: ["clones", "method", "log"],
+		trees: ["lineages", "nodes", "nodeLinks", "builders", "germlineMutations",
+			"knownDistances", "treesLog", "log"],
+		collect: ["nodes", "lineageStats", "nodeProperties", "nodeMetadata", "nodeAbundance",
+			"donorStats", "runId", "treesLog", "log", "perDataset"]
+	}
+	outputsOf := func(stage, r) {
+		out := {}
+		for name in stageNames[stage] {
+			out[name] = r.output(name)
+		}
+		return out
+	}
+
+	// Every stage output, held as a block output so the next run recovers the stages.
+	resultsToCache := {}
+	donorFiles := {}
+	for i := 0; i < groupCount; i++ {
+		suffix := "donor-" + string(i) + ".tsv"
+
+		// TIgGER pooled per donor. MiXCR findAlleles rejects mixed feature sets, so it would split a donor by dataset.
+
+		// Named by dataset: two MiXCR runs over one sample share V, J, junction tuples
+		// but not clonotypes, so the tree step matches rows within a dataset only.
+		airrFiles := {}
+		for entry in allClns {
+			if !inGroup(i, entry.sample) {
+				continue
+			}
+			airrCmd := exec.builder().
+				software(mixcrSw).
+				secret("MI_LICENSE", "MI_LICENSE").
+				mem("4GiB").
+				cpu(1).
+				addFile("input.clns", entry.file).
+				arg("exportAirr").
+				arg("input.clns").arg("airr.tsv").
+				saveFile("airr.tsv").
+				printErrStreamToStdout()
+			// MiXCR looks the library up by the name stored in the clns.
+			if entry.libraryFile != "" {
+				airrCmd.addFile(entry.libraryFile, inputs.libraries[entry.idx])
+			}
+			airr := airrCmd.run()
+			airrFiles[entry.name + ".tsv"] = airr.getFile("airr.tsv")
+		}
+
+		prep := outputsOf("prep", render.create(prepTpl, {
+			clonotypes: split.getFile("split/" + suffix),
+			airr: airrFiles,
+			params: { useLightChains: params.useLightChains }
+		}))
+		cluster := outputsOf("cluster", render.create(clusterTpl, {
+			clonotypes: prep.clonotypes,
+			aligned: prep.aligned,
+			params: {
+				clusteringMode: params.clusteringMode,
+				clusteringThreshold: params.clusteringThreshold,
+				precision: params.precision,
+				sensitivity: params.sensitivity,
+				clonePrefix: params.hasDonorColumn ? donors[i] + "/" : ""
+			}
+		}))
+		treeParams := {
+			igPhyMLScope: params.igPhyMLScope,
+			useLightChains: params.useLightChains
+		}
+		// Unset means no cap, only the structural floor of two tips.
+		if !is_undefined(params.maxTipsPerTree) {
+			treeParams.maxTipsPerTree = params.maxTipsPerTree
+		}
+		if !is_undefined(params.minTipsPerTree) {
+			treeParams.minTipsPerTree = params.minTipsPerTree
+		}
+		trees := outputsOf("trees", render.create(treesTpl, {
+			clonotypes: prep.clonotypes,
+			clones: cluster.clones,
+			aligned: prep.aligned,
+			known: inputs.knownTable,
+			params: treeParams
+		}))
+
+		alignmentsLogs.add([groupName(i)], prep.alignLog)
+		allelesLogs.add([groupName(i)], prep.allelesLog)
+		alleleRoutes.add([groupName(i)], prep.route)
+		clusteringLogs.add([groupName(i)], cluster.log)
+		clusteringMethods.add([groupName(i)], cluster.method)
+		treesLogs.add([groupName(i)], trees.log)
+
+		donorFiles[string(i)] = maps.merge(trees, { clonotypes: prep.clonotypes })
+		resultsToCache[string(i)] = { prep: prep, cluster: cluster, trees: trees }
+	}
+
+	sampleMetadata := {}
+	collectDatasets := []
+	for ds in params.datasets {
+		if ds.hasSampleMetadata {
+			sampleMetadata[ds.index] = inputs.sampleMetadata[ds.index]
+		}
+		collectDatasets = append(collectDatasets, { index: ds.index, isKnown: ds.isKnown })
+	}
+	collected := outputsOf("collect", render.create(collectTpl, {
+		abundance: inputs.abundanceTable,
+		annotations: inputs.annotationsTable,
+		sampleMetadata: sampleMetadata,
+		donors: donorFiles,
+		params: { datasets: collectDatasets, donors: donors, donorsTsv: donorsTsv }
+	}))
+	resultsToCache.collect = collected
+
+	outputs := {
+		allelesLogs: allelesLogs.build(),
+		alignmentsLogs: alignmentsLogs.build(),
+		clusteringLogs: clusteringLogs.build(),
+		treesLogs: treesLogs.build(),
+		// One run for all donors, after the last donor's trees.
+		collectLog: collected.log,
+		alleleRoutes: alleleRoutes.build(),
+		clusteringMethods: clusteringMethods.build(),
+		nodes: collected.nodes,
+		lineageStats: collected.lineageStats,
+		nodeProperties: collected.nodeProperties,
+		nodeMetadata: collected.nodeMetadata,
+		nodeAbundance: collected.nodeAbundance,
+		donorStats: collected.donorStats,
+		runId: collected.runId,
+		// Per-donor counts, plus clonotypes shared between donors or placed nowhere.
+		clusteringLog: split.getStdoutContent(),
+		treesLog: collected.treesLog,
+		resultsToCache: resultsToCache
+	}
+	for ds in params.datasets {
+		idx := ds.index
+		for key in ["lineages", "nodeLinks", "germlineMutations", "memberCounts", "knownDistances"] {
+			outputs[key + "-" + idx] = collected.perDataset.getFutureInputField(key + "-" + idx)
+		}
+		// Per dataset pair: a known antibody id only means something with its issuing dataset.
+		for knownDs in params.datasets {
+			if knownDs.isKnown && knownDs.index != idx {
+				pair := idx + "-" + knownDs.index
+				outputs["knownLinks-" + pair] = collected.perDataset.getFutureInputField("knownLinks-" + pair)
+			}
+		}
+	}
+	return outputs
+})

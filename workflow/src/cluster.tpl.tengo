@@ -1,0 +1,58 @@
+// One donor's HILARy clustering. Pure, and its outputs are kept by the block, so a run that
+// changes only tree settings reuses them.
+
+self := import("@platforma-sdk/workflow-tengo:tpl")
+
+exec := import("@platforma-sdk/workflow-tengo:exec")
+assets := import("@platforma-sdk/workflow-tengo:assets")
+
+hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.hilary:main")
+
+f := exec.formula
+
+self.defineOutputs("clones", "method", "log")
+
+self.body(func(inputs) {
+	params := inputs.params
+
+	// HILARy's pairwise test is quadratic per class, so it gets every core.
+	// RAM is unmeasured on deep repertoires; the floor is generous on purpose.
+	clustering := exec.builder().
+		software(hilarySw).
+		resources({
+			onCPU: {
+				cpu: 16,
+				// Measured at 3.9x + 1.25 GiB, linear up to 510k rows.
+				ram: f.size("aligned").times(6).plus(f.gib(2)).
+					between(f.gib(3), f.gib(256)).staticFallback(f.gib(8))
+			}
+		}).
+		addFile("clonotypes.tsv", inputs.clonotypes, { tag: "aligned" }).
+		addFile("aligned.tsv", inputs.aligned, { tag: "aligned" }).
+		arg("cluster").
+		arg("--clonotypes").arg("clonotypes.tsv").
+		arg("--aligned").arg("aligned.tsv").
+		arg("--out-clones").arg("clones.tsv").
+		arg("--out-method").arg("method.json").
+		arg("--mode").arg(params.clusteringMode).
+		arg("--threshold").arg(string(params.clusteringThreshold)).
+		arg("--precision").arg(string(params.precision)).
+		arg("--sensitivity").arg(string(params.sensitivity)).
+		arg("--threads").arg("16")
+
+	// HILARy numbers clones from 1 per run, so ids need a donor namespace.
+	if params.clonePrefix != "" {
+		clustering.arg("--clone-prefix").arg(params.clonePrefix)
+	}
+
+	clustered := clustering.saveFile("clones.tsv").
+		saveFileContent("method.json").
+		saveStdoutStream().
+		printErrStreamToStdout().run()
+
+	return {
+		clones: clustered.getFile("clones.tsv"),
+		method: clustered.getFileContent("method.json"),
+		log: clustered.getStdoutStream()
+	}
+})

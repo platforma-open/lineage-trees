@@ -1,0 +1,79 @@
+{
+  "name": "@platforma-open/milaboratories.lineage-trees.immcantation",
+  "version": "1.0.0",
+  "description": "Immcantation suite 4.8.0 with Dowser 2.5.1: germline reconstruction, novel allele inference, tree building",
+  "files": [
+    "./dist/**/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "block-tools software build",
+    "test": "bash test/run.sh",
+    "do-pack": "shx rm -f *.tgz && block-tools software build && pnpm pack && shx mv platforma-open*.tgz package.tgz",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
+  },
+  "devDependencies": {
+    "@platforma-open/milaboratories.runenv-python-3": "catalog:",
+    "@platforma-open/milaboratories.runenv-r-lineage-trees": "catalog:",
+    "@platforma-sdk/block-tools": "catalog:"
+  },
+  "block-software": {
+    "artifacts": {
+      "r-archive": {
+        "type": "R",
+        "registry": "platforma-open",
+        "environment": "@platforma-open/milaboratories.runenv-r-lineage-trees:main",
+        "root": "./context"
+      }
+    },
+    "entrypoints": {
+      "main": {
+        "binary": {
+          "artifact": "r-archive",
+          "cmd": [
+            "Rscript",
+            "{pkg}/trees.R"
+          ],
+          "envVars": [
+            "R_GC_MEM_GROW=3"
+          ]
+        },
+        "docker": {
+          "artifact": {
+            "type": "docker",
+            "context": "./context",
+            "dockerfile": "Dockerfile"
+          },
+          "cmd": [
+            "Rscript",
+            "/app/trees.R"
+          ]
+        }
+      },
+      "alleles": {
+        "binary": {
+          "artifact": "r-archive",
+          "cmd": [
+            "Rscript",
+            "{pkg}/alleles.R"
+          ],
+          "envVars": [
+            "R_GC_MEM_GROW=3"
+          ]
+        },
+        "docker": {
+          "artifact": {
+            "type": "docker",
+            "context": "./context",
+            "dockerfile": "Dockerfile"
+          },
+          "cmd": [
+            "Rscript",
+            "/app/alleles.R"
+          ]
+        }
+      }
+    }
+  }
+}

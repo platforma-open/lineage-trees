@@ -1,0 +1,1110 @@
+import type {
+  AxisSpec,
+  InferOutputsType,
+  PColumnSpec,
+  PlDataTableModel,
+  PlDataTableStateV2,
+  PObjectSpec,
+  PlRef,
+  ResultPool,
+  TreeNodeAccessor,
+} from "@platforma-sdk/model";
+import {
+  BlockModelV3,
+  DataColumn,
+  DataModelBuilder,
+  canonicalizeAxisId,
+  createPFrameForGraphs,
+  createPlDataTableStateV2,
+  createPlDataTableV3,
+  getAxisId,
+  getUniquePartitionKeys,
+  isPColumnSpec,
+  parseResourceMap,
+} from "@platforma-sdk/model";
+import type { GraphMakerState } from "@milaboratories/graph-maker";
+import { kind } from "@platforma-open/milaboratories.lineage-trees.kind";
+import type { SOIList } from "./soi";
+import { describeRun } from "./runStatement";
+import { byDepth, lineageFilter, nodeTable, nodeTableParts, nodesFilter } from "./nodeTables";
+
+export * from "./soi";
+
+// Default from HILARy
+export const DEFAULT_CLUSTERING_THRESHOLD = 0.2;
+
+/** What the tools prefix a progress line with; the last such line is what the UI shows. */
+export const PROGRESS_PREFIX = "[==PROGRESS==]";
+
+/** Member clonotypes per lineage, and the lineage table's default sort key. */
+const LINEAGE_SIZE_COLUMN = "pl7.app/clustering/clusterSize";
+
+/** Tree node columns plus each sequence list's hits per node, as the tree graph shows them. */
+function nodeColumnsWithHits(outputs: TreeNodeAccessor | undefined) {
+  const columns = outputs?.resolve("treeNodes")?.getPColumns();
+  if (columns === undefined) return undefined;
+  const hits = (
+    outputs
+      ?.resolve({ field: "soiNodesResults", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.mapFields((_, v) => v?.getPColumns() ?? []) ?? []
+  ).flat();
+  return [...columns, ...hits];
+}
+
+function runIdOf(outputs: TreeNodeAccessor | undefined): string | undefined {
+  return outputs
+    ?.resolve({ field: "runId", allowPermanentAbsence: true, stableIfNotFound: true })
+    ?.getDataAsJson<{ runId: string }>()?.runId;
+}
+
+/** Whether a saved entry belongs to the result on show. Entries without a run key never match. */
+export const isCurrent = (entry: { runKey?: string }, runKey: string | undefined) =>
+  runKey !== undefined && entry.runKey === runKey;
+
+/** Views opened on the result on show. */
+function currentViews<V extends { runKey?: string }>(
+  views: V[] | undefined,
+  runKey: string | undefined,
+): V[] {
+  return (views ?? []).filter((view) => isCurrent(view, runKey));
+}
+
+// "Known antibodies": datasets the user marks to measure relatives against. SDK anchors appear only as the bundle's "ds0", "ds1".
+
+export type BlockData = {
+  /** Upstream clonotyping datasets in picker order; `args` sorts them. */
+  datasets: PlRef[];
+  /** Known antibody datasets. Their members survive tree filters and set each member's tree distance. `args` drops refs not in `datasets`. */
+  knownDatasets: PlRef[];
+  /** Sample metadata naming each sample's donor. Clustering never crosses donors. */
+  donorColumn?: PlRef;
+  /** `fixed`: single linkage per V, J and CDR3 length class. `adaptive`: HILARy's full method, human only. */
+  clusteringMode: ClusteringMode;
+  /** Fixed mode: a fraction of the CDR3 length. */
+  clusteringThreshold: number;
+  /** Adaptive mode: desired precision, HILARy's default 0.99. */
+  precision: number;
+  /** Adaptive mode: desired sensitivity, HILARy's default 0.9. */
+  sensitivity: number;
+  /** Larger lineages are subsampled to this, known antibodies kept. Left-out clonotypes lose only tree columns. */
+  maxTipsPerTree?: number;
+  /** Smaller lineages get no tree. Unset means the floor of two. */
+  minTipsPerTree?: number;
+  /** Lineages built with IgPhyML instead of FastTree+RAxML. More accurate but slow. */
+  igPhyMLScope: IgPhyMLScope;
+  /** Lists of sequences to find in the trees; only non-empty lists reach the workflow. */
+  sequencesOfInterest: SOIList[];
+  /** UI-only, never projected. */
+  treesTableState: PlDataTableStateV2;
+  /** One per opened tree section. UI-only, never projected. `tab` and `tableState` are absent on older projects. */
+  treeViews: {
+    id: string;
+    lineageId: string;
+    /** Run it was opened on. A rerun changes lineage ids and the lineage axis. */
+    runKey?: string;
+    state: GraphMakerState;
+    tab?: "graph" | "table";
+    tableState?: PlDataTableStateV2;
+  }[];
+  /** One per opened path section. Written only on a user gesture. UI-only, never projected. */
+  pathViews: {
+    id: string;
+    lineageId: string;
+    lineageLabel: string;
+    /** Run it was opened on, as for tree views. */
+    runKey?: string;
+    nodeId?: string;
+    nodeLabel?: string;
+    nodeIds: string[];
+    tableState: PlDataTableStateV2;
+  }[];
+  /** Named sets of collected nodes, one section each. Their clonotypes are projected as `BlockArgs.baskets`. Absent on older projects. */
+  baskets: NodeBasket[];
+  /** Subtitle the user typed; empty or absent falls back to `defaultSubtitle`. Absent on older projects. */
+  customBlockLabel?: string;
+};
+
+/** Ids point into the `runKey` run; the rest is copied so the entry survives a rerun. */
+export type BasketNode = {
+  lineageId: string;
+  nodeId: string;
+  runKey: string;
+  lineageLabel: string;
+  nodeLabel: string;
+  heavySequence?: string;
+  lightSequence?: string;
+  /** Clonotype keys by dataset run id; empty for an inferred node. Absent on entries added before baskets were exported. */
+  clonotypes?: Record<string, string[]>;
+};
+
+export type NodeBasket = {
+  id: string;
+  name: string;
+  nodes: BasketNode[];
+  tableState: PlDataTableStateV2;
+};
+
+export type ClusteringMode = "fixed" | "adaptive";
+
+export const CLUSTERING_MODE_OPTIONS = [
+  { value: "fixed", label: "Fixed threshold" },
+  { value: "adaptive", label: "Adaptive, HILARy (human only)" },
+] as const satisfies readonly { value: ClusteringMode; label: string }[];
+
+/** HILARy's own defaults for its adaptive methods. */
+export const DEFAULT_PRECISION = 0.99;
+export const DEFAULT_SENSITIVITY = 0.9;
+
+/** Data shape before several datasets were accepted. */
+type BlockDataV1 = Omit<
+  BlockData,
+  | "datasets"
+  | "knownDatasets"
+  | "igPhyMLScope"
+  | "clusteringMode"
+  | "precision"
+  | "sensitivity"
+  | "maxTipsPerTree"
+  | "minTipsPerTree"
+  | "sequencesOfInterest"
+> & {
+  inputAnchor?: PlRef;
+  useIgPhyML: boolean;
+  useLightChains: boolean;
+  overviewTableState: PlDataTableStateV2;
+};
+
+export type IgPhyMLScope = "none" | "known" | "all";
+
+/** Data shape before "anchor" was renamed to "known antibody". */
+type BlockDataV2 = Omit<BlockData, "knownDatasets" | "igPhyMLScope"> & {
+  anchorDatasets: PlRef[];
+  igPhyMLScope: "none" | "anchored" | "all";
+};
+
+export const IGPHYML_SCOPE_OPTIONS = [
+  { value: "none", label: "None (FastTree and RAxML for every lineage)" },
+  { value: "known", label: "Lineages holding a known antibody" },
+  { value: "all", label: "Every lineage" },
+] as const satisfies readonly { value: IgPhyMLScope; label: string }[];
+
+export type BlockArgs = {
+  /** Sorted and deduplicated, so reordering the picker changes nothing. */
+  datasets: PlRef[];
+  /** Sorted, and only refs that are also in `datasets`. */
+  knownDatasets: PlRef[];
+  donorColumn?: PlRef;
+  clusteringMode: ClusteringMode;
+  clusteringThreshold: number;
+  precision: number;
+  sensitivity: number;
+  maxTipsPerTree?: number;
+  minTipsPerTree?: number;
+  /** Lists with at least one sequence, sorted by id. */
+  sequencesOfInterest: SOIList[];
+  igPhyMLScope: IgPhyMLScope;
+  /** Typed subtitle; names the clustering downstream in place of the computed label. Absent when blank. */
+  customBlockLabel?: string;
+  /** Baskets with clonotypes, sorted by id, keys sorted per dataset run id. Absent when none. */
+  baskets?: BasketArg[];
+};
+
+/** A basket as exported: one subset column per dataset it has clonotypes in. */
+export type BasketArg = { id: string; name: string; clonotypes: Record<string, string[]> };
+
+/** Sorted throughout, so reordering baskets or nodes does not stale the block. */
+export function basketArgs(baskets: NodeBasket[]): BasketArg[] | undefined {
+  const out = baskets
+    .map((basket) => {
+      const byDataset = new Map<string, Set<string>>();
+      for (const node of basket.nodes) {
+        for (const [dataset, keys] of Object.entries(node.clonotypes ?? {})) {
+          const set = byDataset.get(dataset) ?? new Set<string>();
+          keys.forEach((key) => set.add(key));
+          byDataset.set(dataset, set);
+        }
+      }
+      const clonotypes = Object.fromEntries(
+        [...byDataset]
+          .filter(([, keys]) => keys.size > 0)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([dataset, keys]) => [dataset, [...keys].sort()]),
+      );
+      return { id: basket.id, name: basket.name, clonotypes };
+    })
+    .filter((basket) => Object.keys(basket.clonotypes).length > 0)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return out.length > 0 ? out : undefined;
+}
+
+/** Which shape of clonotyping output a dataset is. */
+export type Modality = "bulk-heavy" | "paired-sc";
+
+/** Where the tree step gets alignments: `mixcr` from clns, `upstream` from imported columns, `none` gives no trees. */
+export type AlignmentSource = "mixcr" | "upstream" | "none";
+
+/** A gene one source (MiXCR or imported datasets) uses and the other never does. */
+export type GeneMismatch = { gene: string; source: "MiXCR" | "imported"; share: number };
+
+/** A gene counts once it carries this share of a source's clonotypes... */
+const GENE_MISMATCH_SHARE = 0.01;
+/** ...and the other source is large enough that this many of its clonotypes would carry it. */
+const GENE_MISMATCH_EXPECTED = 10;
+
+export type DonorStats = { donor: string; clonotype_count: number; lineage_count: number };
+
+/** The group a run without a donor column clusters as; the workflow names it the same. */
+export const SINGLE_GROUP = "all samples";
+
+/** Picked datasets with samples lacking a donor value, and whether no sample has one. */
+export type SamplesWithoutDonor = {
+  datasets: { dataset: string; missing: number; total: number }[];
+  noneNamed: boolean;
+};
+
+/** What the workflow reports about each dataset of the last run. */
+export type DatasetRun = {
+  runId: string;
+  modality: Modality;
+  alignmentSource: AlignmentSource;
+  isKnown: boolean;
+};
+
+const RUN_ID_DOMAIN = "pl7.app/vdj/clonotypingRunId";
+
+/** A dataset's alignment route from pool specs, for the UI before the run. Must mirror the workflow. */
+export function alignmentRouteFor(anchor: PColumnSpec, specs: PObjectSpec[]): AlignmentSource {
+  const sampleAxis = anchor.axesSpec[0];
+  const clonotypeAxis = anchor.axesSpec[1];
+  const runId = clonotypeAxis?.domain?.[RUN_ID_DOMAIN];
+  const columns = specs.filter(isPColumnSpec);
+
+  const perSample = (spec: PColumnSpec) =>
+    spec.axesSpec.length === 1 &&
+    spec.axesSpec[0]?.name === sampleAxis?.name &&
+    spec.domain?.[RUN_ID_DOMAIN] === runId;
+  const perClonotype = (spec: PColumnSpec) =>
+    spec.axesSpec.length === 1 &&
+    spec.axesSpec[0]?.name === clonotypeAxis?.name &&
+    spec.axesSpec[0]?.domain?.[RUN_ID_DOMAIN] === runId;
+  const nucleotide = (spec: PColumnSpec) => spec.domain?.["pl7.app/alphabet"] === "nucleotide";
+
+  if (columns.some((spec) => perSample(spec) && spec.name === "mixcr.com/clns")) return "mixcr";
+  const carries = (name: string, feature?: string) =>
+    columns.some(
+      (spec) =>
+        perClonotype(spec) &&
+        nucleotide(spec) &&
+        spec.name === name &&
+        (feature === undefined || spec.domain?.["pl7.app/vdj/feature"] === feature),
+    );
+  // Both are needed: a sequence without its germline is not an alignment.
+  if (carries("pl7.app/vdj/sequenceAlignment") && carries("pl7.app/vdj/germlineAlignment")) {
+    return "upstream";
+  }
+  return "none";
+}
+
+/** A dataset's modality, or undefined if not accepted. Only IG: T cells have no hypermutation. */
+export function datasetModality(spec: PObjectSpec): Modality | undefined {
+  if (!isPColumnSpec(spec)) return undefined;
+  if (spec.annotations?.["pl7.app/isAnchor"] !== "true") return undefined;
+  if (spec.axesSpec.length < 2) return undefined;
+  if (spec.axesSpec[0]?.name !== "pl7.app/sampleId") return undefined;
+
+  const keyAxis = spec.axesSpec[1];
+  if (keyAxis === undefined) return undefined;
+  if (keyAxis.name === "pl7.app/vdj/clonotypeKey") {
+    return keyAxis.domain?.["pl7.app/vdj/chain"] === "IGHeavy" ? "bulk-heavy" : undefined;
+  }
+  if (keyAxis.name === "pl7.app/vdj/scClonotypeKey") {
+    return keyAxis.domain?.["pl7.app/vdj/receptor"] === "IG" ? "paired-sc" : undefined;
+  }
+  return undefined;
+}
+
+/** Axis identity as a string: name plus sorted domain. Tells which datasets a donor column reaches. */
+function axisKey(axis: AxisSpec): string {
+  const id = getAxisId(axis);
+  const domain = Object.entries(id.domain ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify([id.name, domain]);
+}
+
+/** One string per ref, for sets and maps; the workflow keys known antibodies the same way. */
+export const refKey = (ref: PlRef) => `${ref.blockId}/${ref.name}`;
+
+/** Picked known antibody datasets, deduplicated and sorted; none with one dataset. Shared by args and settings. */
+export function effectiveKnown(data: Pick<BlockData, "datasets" | "knownDatasets">): PlRef[] {
+  const datasets = canonicalRefs(data.datasets ?? []);
+  if (datasets.length < 2) return [];
+  const picked = new Set(datasets.map(refKey));
+  return canonicalRefs(data.knownDatasets ?? []).filter((ref) => picked.has(refKey(ref)));
+}
+
+function canonicalRefs(refs: PlRef[]): PlRef[] {
+  const byKey = new Map<string, PlRef>();
+  for (const ref of refs) byKey.set(refKey(ref), ref);
+  return [...byKey.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, ref]) => ref);
+}
+
+/** A per-donor resource map among the workflow's outputs. */
+const donorResourceMap = (outputs: TreeNodeAccessor | undefined, field: string) =>
+  outputs?.resolve({ field, assertFieldType: "Input", allowPermanentAbsence: true });
+
+/** One parsed value per donor. */
+function donorMap<T>(
+  outputs: TreeNodeAccessor | undefined,
+  field: string,
+  read: (acc: TreeNodeAccessor) => T | undefined,
+) {
+  return parseResourceMap(donorResourceMap(outputs, field), read, false);
+}
+
+/** A stage's per-donor live stdout, kept for donors whose log has not started. */
+function stageStream<T>(
+  outputs: TreeNodeAccessor | undefined,
+  field: string,
+  read: (acc: TreeNodeAccessor) => T | undefined,
+) {
+  return parseResourceMap(donorResourceMap(outputs, field), read, true);
+}
+
+/** Log handles for the log view. */
+const stageLogs = (outputs: TreeNodeAccessor | undefined, field: string) =>
+  stageStream(outputs, field, (acc) => acc.getLogHandle());
+
+/** The last progress line per donor, for the bar. */
+const stageProgress = (outputs: TreeNodeAccessor | undefined, field: string) =>
+  stageStream(outputs, field, (acc) => acc.getProgressLog(PROGRESS_PREFIX));
+
+const collectStream = (outputs: TreeNodeAccessor | undefined) =>
+  outputs?.resolve({ field: "collectLog", assertFieldType: "Input", allowPermanentAbsence: true });
+
+const readAlleleRoute = (acc: TreeNodeAccessor) =>
+  acc.getDataAsJson<{ route: string; reason: string }>();
+/** A donor value as the workflow names it: tabs and newlines to spaces, trimmed; blank is none. */
+function donorName(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const name = String(value)
+    .replace(/[\t\n]/g, " ")
+    .trim();
+  return name === "" ? undefined : name;
+}
+
+/**
+ * Each picked dataset on the donor column's samples, with every sample's donor name, cleaned
+ * as the workflow cleans it (tabs and newlines to spaces, trimmed); undefined for no value or a
+ * blank one. Datasets on another sample axis are left out (see datasetsOutsideDonorColumn).
+ * Undefined while the donor column or a dataset's samples are not readable.
+ */
+function donorsOfSamples(
+  pool: ResultPool,
+  donorRef: PlRef,
+  refs: PlRef[],
+): { ref: PlRef; donors: (string | undefined)[] }[] | undefined {
+  const donor = pool.getPColumnByRef(donorRef);
+  const donorAxis = donor?.spec.axesSpec[0];
+  const values = donor?.data?.getDataAsJsonOrUndefined<{ data?: Record<string, unknown> }>()?.data;
+  if (donorAxis === undefined || values === undefined) return undefined;
+  const nameOf = (sample: string) => donorName(values[JSON.stringify([sample])]);
+  const donorKey = axisKey(donorAxis);
+  const out: { ref: PlRef; donors: (string | undefined)[] }[] = [];
+  for (const ref of canonicalRefs(refs)) {
+    const column = pool.getPColumnByRef(ref);
+    if (column === undefined || axisKey(column.spec.axesSpec[0]) !== donorKey) continue;
+    const samples = getUniquePartitionKeys(column.data)?.[0];
+    if (samples === undefined) return undefined;
+    out.push({ ref, donors: samples.map((s) => nameOf(String(s))) });
+  }
+  return out;
+}
+
+const readClusteringMethod = (acc: TreeNodeAccessor) =>
+  acc.getDataAsJson<{ method: string; reason: string }>();
+
+/** Clonotyping datasets: bulk and single-cell anchor columns keyed by sample. */
+const DATASET_QUERY = [
+  {
+    axes: [{ name: "pl7.app/sampleId" }, { name: "pl7.app/vdj/clonotypeKey" }],
+    annotations: { "pl7.app/isAnchor": "true" },
+  },
+  {
+    axes: [{ name: "pl7.app/sampleId" }, { name: "pl7.app/vdj/scClonotypeKey" }],
+    annotations: { "pl7.app/isAnchor": "true" },
+  },
+];
+
+/** The picker's label for each dataset, keyed by `refKey`, so every message names it alike. */
+function datasetLabels(resultPool: ResultPool): Map<string, string> {
+  return new Map(resultPool.getOptions(DATASET_QUERY).map((o) => [refKey(o.ref), o.label]));
+}
+
+/**
+ * Why the settings cannot run, in words for the user, or undefined when they can. `args`
+ * throws with it; the platform only disables Run, so the UI shows this text beside it.
+ * A missing dataset is not one: the Datasets field marks it.
+ */
+export function settingsProblem(data: BlockData): string | undefined {
+  const clusteringMode = data.clusteringMode ?? "fixed";
+  if (
+    clusteringMode === "fixed" &&
+    !(data.clusteringThreshold > 0 && data.clusteringThreshold < 1)
+  ) {
+    return "Clustering threshold must be a fraction between 0 and 1.";
+  }
+  if (clusteringMode === "adaptive") {
+    const fraction = (v: number) => v > 0 && v <= 1;
+    if (
+      !fraction(data.precision ?? DEFAULT_PRECISION) ||
+      !fraction(data.sensitivity ?? DEFAULT_SENSITIVITY)
+    ) {
+      return "Precision and sensitivity must be fractions between 0 and 1.";
+    }
+  }
+  const max = data.maxTipsPerTree;
+  // The tree builders need three tips; below that no cap makes sense.
+  if (max !== undefined && !(Number.isInteger(max) && max >= 3)) {
+    return "Maximum tips per tree must be a whole number of at least 3.";
+  }
+  const min = data.minTipsPerTree;
+  if (
+    min !== undefined &&
+    !(Number.isInteger(min) && min >= 2 && (max === undefined || min <= max))
+  ) {
+    return "Minimum tips per tree must be a whole number between 2 and the maximum.";
+  }
+  return undefined;
+}
+
+/** Block subtitle from the clustering settings, short form of the workflow's trace label. */
+export function defaultSubtitle(data: BlockData): string {
+  const parts =
+    (data.clusteringMode ?? "fixed") === "adaptive"
+      ? [`HILARy adaptive, precision ${data.precision}`, `sensitivity ${data.sensitivity}`]
+      : [`HILARy fixed, threshold ${data.clusteringThreshold}`];
+  if (data.igPhyMLScope === "known") parts.push("IgPhyML on lineages holding a known antibody");
+  if (data.igPhyMLScope === "all") parts.push("IgPhyML on all lineages");
+  if (data.maxTipsPerTree !== undefined) parts.push(`max ${data.maxTipsPerTree} tips`);
+  return parts.join(", ");
+}
+
+/** A new block's data; tests start from it too. A template can seed only `clusteringThreshold`. */
+export function defaultBlockData(
+  clusteringThreshold: number = DEFAULT_CLUSTERING_THRESHOLD,
+): BlockData {
+  return {
+    datasets: [],
+    knownDatasets: [],
+    igPhyMLScope: "none",
+    clusteringMode: "fixed",
+    precision: DEFAULT_PRECISION,
+    sensitivity: DEFAULT_SENSITIVITY,
+    sequencesOfInterest: [],
+    clusteringThreshold,
+    treesTableState: createPlDataTableStateV2(),
+    treeViews: [],
+    pathViews: [],
+    baskets: [],
+  };
+}
+
+const dataModel = new DataModelBuilder({ kind })
+  .from<BlockDataV1>("v1")
+  // v2: dataset becomes a list, IgPhyML switch a scope; two old fields dropped.
+  .migrate<BlockDataV2>(
+    "v2",
+    ({ inputAnchor, useIgPhyML, useLightChains: _l, overviewTableState: _, ...rest }) => ({
+      ...rest,
+      datasets: inputAnchor === undefined ? [] : [inputAnchor],
+      anchorDatasets: [],
+      igPhyMLScope: useIgPhyML ? "all" : "none",
+      clusteringMode: "fixed",
+      precision: DEFAULT_PRECISION,
+      sensitivity: DEFAULT_SENSITIVITY,
+      sequencesOfInterest: [],
+    }),
+  )
+  // v3: "anchor" renamed to "known antibody".
+  .migrate<BlockData>("v3", ({ anchorDatasets, igPhyMLScope, ...rest }) => ({
+    ...rest,
+    knownDatasets: anchorDatasets,
+    igPhyMLScope: igPhyMLScope === "anchored" ? "known" : igPhyMLScope,
+  }))
+  .init(({ params }) => defaultBlockData(params?.clusteringThreshold));
+
+export const platforma = BlockModelV3.create({ dataModel, kind })
+  .args<BlockArgs>((data) => {
+    const datasets = canonicalRefs(data.datasets ?? []);
+    if (datasets.length === 0) throw new Error("No input dataset");
+    // The platform shows no reason when this throws, so the UI reads the same check (settingsProblem).
+    const problem = settingsProblem(data);
+    if (problem !== undefined) throw new Error(problem);
+    // Known antibody refs no longer in `datasets` are dropped rather than failing the run.
+    const knownDatasets = effectiveKnown(data);
+    const clusteringMode = data.clusteringMode ?? "fixed";
+    // Unset means no cap and a floor of two.
+    const maxTipsPerTree = data.maxTipsPerTree;
+    const minTipsPerTree = data.minTipsPerTree;
+    // Drop empty lists and sort, so adding or reordering lists does not stale the block.
+    const sequencesOfInterest = (data.sequencesOfInterest ?? [])
+      .filter((list) => list.sequences.length > 0)
+      .map((list) => ({
+        parameters: list.parameters,
+        // The workflow writes names into a tab-separated file; a tab or line break would split it.
+        sequences: [...list.sequences]
+          .map((seq) => ({ ...seq, name: seq.name.replace(/[\t\r\n]+/g, " ") }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
+      }))
+      .sort((a, b) => a.parameters.id.localeCompare(b.parameters.id));
+    return {
+      maxTipsPerTree,
+      minTipsPerTree,
+      sequencesOfInterest,
+      // "known" without known antibodies builds no IgPhyML tree but labels distances as mixed.
+      igPhyMLScope:
+        data.igPhyMLScope === "known" && knownDatasets.length === 0
+          ? "none"
+          : (data.igPhyMLScope ?? "none"),
+      datasets,
+      knownDatasets,
+      // Absent means one donor; the workflow treats it as a single group.
+      donorColumn: data.donorColumn,
+      clusteringMode,
+      // Only the active mode's parameters pass, so editing the other mode does not stale.
+      clusteringThreshold:
+        clusteringMode === "fixed" ? data.clusteringThreshold : DEFAULT_CLUSTERING_THRESHOLD,
+      precision:
+        clusteringMode === "adaptive" ? (data.precision ?? DEFAULT_PRECISION) : DEFAULT_PRECISION,
+      sensitivity:
+        clusteringMode === "adaptive"
+          ? (data.sensitivity ?? DEFAULT_SENSITIVITY)
+          : DEFAULT_SENSITIVITY,
+      // Undefined when blank, so projects without a subtitle do not stale.
+      customBlockLabel: data.customBlockLabel?.trim() || undefined,
+      // Undefined without exportable baskets, for the same reason.
+      baskets: basketArgs(data.baskets ?? []),
+    };
+  })
+  // Inverse of `init`, so an exported template round-trips.
+  .templateParams((data) => ({ clusteringThreshold: data.clusteringThreshold }))
+
+  // The receptor is in the axis domain, which the query cannot express, so IG is checked here.
+  .output("inputOptions", (ctx) =>
+    ctx.resultPool.getOptions(DATASET_QUERY).filter((option) => {
+      const spec = ctx.resultPool.getPColumnSpecByRef(option.ref);
+      return spec !== undefined && datasetModality(spec) !== undefined;
+    }),
+  )
+
+  /**
+   * Each offered dataset's alignment route, keyed by `refKey`. Reads no settings, so it is
+   * ready before a pick and the UI can say at once what a picked dataset lacks.
+   */
+  .output("alignmentRoutes", (ctx): Record<string, AlignmentSource> => {
+    const specs = ctx.resultPool.getSpecs().entries.map((entry) => entry.obj);
+    const out: Record<string, AlignmentSource> = {};
+    for (const option of ctx.resultPool.getOptions(DATASET_QUERY)) {
+      const spec = ctx.resultPool.getPColumnSpecByRef(option.ref);
+      if (spec === undefined || datasetModality(spec) === undefined) continue;
+      out[refKey(option.ref)] = alignmentRouteFor(spec, specs);
+    }
+    return out;
+  })
+
+  /**
+   * Sample columns that can name a donor: `pl7.app/metadata` or `pl7.app/label`, on the sample
+   * axis of a picked dataset or of the chosen column, so the choice stays listed. All of them
+   * before anything is picked.
+   */
+  .output("donorOptions", (ctx) => {
+    const sampleAxes = new Set<string>();
+    const refs = [
+      ...(ctx.data.datasets ?? []),
+      ...(ctx.data.donorColumn ? [ctx.data.donorColumn] : []),
+    ];
+    for (const ref of refs) {
+      const axis = ctx.resultPool.getPColumnSpecByRef(ref)?.axesSpec[0];
+      if (axis !== undefined) sampleAxes.add(axisKey(axis));
+    }
+    return ctx.resultPool.getOptions((spec) => {
+      if (!isPColumnSpec(spec)) return false;
+      if (spec.axesSpec.length !== 1) return false;
+      const axis = spec.axesSpec[0];
+      if (axis?.name !== "pl7.app/sampleId") return false;
+      if (spec.name !== "pl7.app/metadata" && spec.name !== "pl7.app/label") return false;
+      return sampleAxes.size === 0 || sampleAxes.has(axisKey(axis));
+    });
+  })
+
+  /** Datasets on another sample axis than the donor column. They get no donor and are not clustered. */
+  .output("datasetsOutsideDonorColumn", (ctx): string[] => {
+    if (ctx.data.donorColumn === undefined) return [];
+    const donorSpec = ctx.resultPool.getPColumnSpecByRef(ctx.data.donorColumn);
+    const donorAxis = donorSpec?.axesSpec[0];
+    if (donorAxis === undefined) return [];
+    const donorKey = axisKey(donorAxis);
+    const labels = datasetLabels(ctx.resultPool);
+    const out: string[] = [];
+    for (const ref of canonicalRefs(ctx.data.datasets ?? [])) {
+      const spec = ctx.resultPool.getPColumnSpecByRef(ref);
+      if (spec === undefined || axisKey(spec.axesSpec[0]) === donorKey) continue;
+      out.push(labels.get(refKey(ref)) ?? ref.name);
+    }
+    return out;
+  })
+
+  /**
+   * Per picked dataset on the donor column's samples, how many of its samples have no donor
+   * value (absent, null or blank). Those samples are left out of clustering; when no sample
+   * has one, nothing can be clustered and the workflow stops with the same message.
+   * Undefined while the donor column or a dataset's samples are not readable yet.
+   */
+  .output("samplesWithoutDonor", (ctx): SamplesWithoutDonor | undefined => {
+    if (ctx.data.donorColumn === undefined) return { datasets: [], noneNamed: false };
+    const perDataset = donorsOfSamples(
+      ctx.resultPool,
+      ctx.data.donorColumn,
+      ctx.data.datasets ?? [],
+    );
+    if (perDataset === undefined) return undefined;
+    const labels = datasetLabels(ctx.resultPool);
+    const datasets: SamplesWithoutDonor["datasets"] = [];
+    for (const { ref, donors } of perDataset) {
+      const missing = donors.filter((d) => d === undefined).length;
+      if (missing > 0) {
+        datasets.push({
+          dataset: labels.get(refKey(ref)) ?? ref.name,
+          missing,
+          total: donors.length,
+        });
+      }
+    }
+    const noneNamed =
+      perDataset.length > 0 &&
+      perDataset.every(({ donors }) => donors.every((d) => d === undefined));
+    return { datasets, noneNamed };
+  })
+
+  /**
+   * The donors the current run clusters, known from its args before any stage starts, so the
+   * Overview lists them at once, as upstream blocks list their samples. Like the workflow, every
+   * named value in the donor column is a group; one "all samples" group without a donor column.
+   * Undefined with no run, or while the donor column is not readable.
+   */
+  .output("expectedDonors", (ctx): string[] | undefined => {
+    const args = ctx.activeArgs;
+    if (args === undefined) return undefined;
+    if (args.donorColumn === undefined) return [SINGLE_GROUP];
+    const values = ctx.resultPool
+      .getPColumnByRef(args.donorColumn)
+      ?.data?.getDataAsJsonOrUndefined<{ data?: Record<string, unknown> }>()?.data;
+    if (values === undefined) return undefined;
+    const donors = new Set<string>();
+    for (const v of Object.values(values)) {
+      const name = donorName(v);
+      if (name !== undefined) donors.add(name);
+    }
+    return [...donors].sort();
+  })
+
+  /**
+   * From the last run: genes common in one source (MiXCR or imported datasets) that the other,
+   * large enough to show them, never uses. That usually means the two were annotated against
+   * different references, and such clonotypes cannot join lineages across the sources.
+   * Undefined before a run.
+   */
+  .output("geneMismatch", (ctx): GeneMismatch[] | undefined => {
+    const args = ctx.activeArgs;
+    if (args === undefined) return undefined;
+    const usage = ctx.outputs
+      ?.resolve({ field: "geneUsage", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.getDataAsJson<Record<string, Partial<Record<"v" | "j", Record<string, number>>>>>();
+    if (usage === undefined) return undefined;
+    const specs = ctx.resultPool.getSpecs().entries.map((entry) => entry.obj);
+    // Gene counts per source; merge numbers datasets by their position in args.
+    const sources = {
+      MiXCR: [] as Record<string, number>[],
+      imported: [] as Record<string, number>[],
+    };
+    const byKind = (kind: "v" | "j", source: keyof typeof sources) => {
+      const counts: Record<string, number> = {};
+      for (const dataset of sources[source]) {
+        for (const [gene, n] of Object.entries(dataset)) counts[gene] = (counts[gene] ?? 0) + n;
+      }
+      return counts;
+    };
+    const out: GeneMismatch[] = [];
+    for (const kind of ["v", "j"] as const) {
+      sources.MiXCR = [];
+      sources.imported = [];
+      args.datasets.forEach((ref, i) => {
+        const spec = ctx.resultPool.getPColumnSpecByRef(ref);
+        const counts = usage[String(i)]?.[kind];
+        if (spec === undefined || counts === undefined) return;
+        const source = alignmentRouteFor(spec, specs) === "mixcr" ? "MiXCR" : "imported";
+        sources[source].push(counts);
+      });
+      const mixcr = byKind(kind, "MiXCR");
+      const imported = byKind(kind, "imported");
+      for (const [source, own, other] of [
+        ["MiXCR", mixcr, imported],
+        ["imported", imported, mixcr],
+      ] as const) {
+        const total = Object.values(own).reduce((a, b) => a + b, 0);
+        const otherTotal = Object.values(other).reduce((a, b) => a + b, 0);
+        if (total === 0 || otherTotal === 0) continue;
+        for (const [gene, n] of Object.entries(own)) {
+          const share = n / total;
+          if (share < GENE_MISMATCH_SHARE || other[gene] !== undefined) continue;
+          if (share * otherTotal < GENE_MISMATCH_EXPECTED) continue;
+          out.push({ gene, source, share });
+        }
+      }
+    }
+    return out.sort((a, b) => b.share - a.share);
+  })
+
+  /** What ran. Reads `activeArgs` so it matches the results on screen, not unrun edits. */
+  .output("modeStatement", (ctx) => {
+    const args = ctx.activeArgs;
+    if (args === undefined) return undefined;
+    // Absent on projects run before this output existed.
+    const runs = ctx.outputs
+      ?.resolve({ field: "datasets", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.getDataAsJson<DatasetRun[]>();
+    if (runs === undefined) return undefined;
+    const methods = donorMap(ctx.outputs, "clusteringMethods", readClusteringMethod).data.map(
+      (entry) => entry.value.method,
+    );
+    const routes = donorMap(ctx.outputs, "alleleRoutes", readAlleleRoute).data.map(
+      (entry) => entry.value.route,
+    );
+    return describeRun(args, runs, methods, routes);
+  })
+
+  /** Donors where every clonotype is its own lineage: no V, J and CDR3-length group held two. */
+  .output("singletonDonors", (ctx): string[] =>
+    donorMap(ctx.outputs, "clusteringMethods", readClusteringMethod)
+      .data.filter((entry) => entry.value.method === "singletons")
+      .map((entry) => String(entry.key[0]))
+      .sort(),
+  )
+
+  /** Donors with no clonotypes in the picked datasets, once clustering has run. */
+  .output("emptyDonors", (ctx): string[] =>
+    (
+      ctx.outputs
+        ?.resolve({ field: "donorStats", allowPermanentAbsence: true, stableIfNotFound: true })
+        ?.getDataAsJson<DonorStats[]>() ?? []
+    )
+      .filter((stats) => stats.clonotype_count === 0)
+      .map((stats) => stats.donor)
+      .sort(),
+  )
+
+  /** Per-donor clonotype and lineage counts, once clustering has run. */
+  .output("donorStats", (ctx) =>
+    ctx.outputs
+      ?.resolve({ field: "donorStats", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.getDataAsJson<DonorStats[]>(),
+  )
+
+  /** One row per lineage. */
+  .outputWithStatus("treesTable", (ctx) => {
+    const own = ctx.outputs?.resolve("treesTable")?.getPColumns();
+    if (own === undefined || own.length === 0) return undefined;
+    // Best hit per lineage for each sequence list.
+    const soi = (
+      ctx.outputs
+        ?.resolve({ field: "soiTreesResults", allowPermanentAbsence: true, stableIfNotFound: true })
+        ?.mapFields((_, v) => v?.getPColumns() ?? []) ?? []
+    ).flat();
+    const columns = [...own, ...soi];
+    const recipes = columns.map((column) => DataColumn.fromColumn(column));
+    // Largest lineages first by default.
+    const size = recipes.find((recipe) => recipe.getSpec().name === LINEAGE_SIZE_COLUMN);
+    // Size is primary: every lineage has one. The label column must not be primary.
+    const primary = size ?? recipes[0];
+    return createPlDataTableV3(ctx, {
+      primaryColumns: [primary],
+      columns: recipes.filter((recipe) => recipe !== primary),
+      tableState: ctx.data.treesTableState,
+      sorting:
+        size === undefined
+          ? undefined
+          : [
+              {
+                column: { type: "column", id: size.id },
+                ascending: false,
+                naAndAbsentAreLeastValues: true,
+              },
+            ],
+    });
+  })
+
+  // Raw stdout, not JSON. getDataAsString gives undefined while empty.
+  .output("clusteringLog", (ctx) => ctx.outputs?.resolve("clusteringLog")?.getDataAsString())
+
+  // How many clonotypes and abundance rows each dataset brought to the merge.
+  .output("mergeLog", (ctx) =>
+    ctx.outputs
+      ?.resolve({ field: "mergeLog", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.getDataAsString(),
+  )
+
+  // Join counts, light chain split and skipped lineages.
+  .output("treesLog", (ctx) => ctx.outputs?.resolve("treesLog")?.getDataAsString())
+
+  /** Why no trees were built, read from the tree step's log. */
+  .output("noTreesReason", (ctx) => {
+    const log = ctx.outputs?.resolve("treesLog")?.getDataAsString();
+    if (log === undefined || log === "") return undefined;
+    const built = [...log.matchAll(/built (\d+) trees/g)].reduce(
+      (total, match) => total + Number(match[1]),
+      0,
+    );
+    if (built > 0) return undefined;
+    const reasons = [...log.matchAll(/^(.+): no trees for this group$/gm)].map((m) => m[1]);
+    return reasons.length > 0
+      ? `No trees were built: ${[...new Set(reasons)].join("; ")}.`
+      : "No trees were built.";
+  })
+
+  .outputWithStatus("treeNodesPf", (ctx) => {
+    const columns = ctx.outputs?.resolve("treeNodes")?.getPColumns();
+    if (columns === undefined || columns.length === 0) return undefined;
+    // Sequence list hits per node.
+    const soi = (
+      ctx.outputs
+        ?.resolve({ field: "soiNodesResults", allowPermanentAbsence: true, stableIfNotFound: true })
+        ?.mapFields((_, v) => v?.getPColumns() ?? []) ?? []
+    ).flat();
+    return createPFrameForGraphs(ctx, [...columns, ...soi]);
+  })
+
+  /** Per sequence list, how many nodes and lineages the last run's search hit. */
+  .output("soiHits", (ctx): Record<string, { nodes: number; lineages: number }> | undefined => {
+    const acc = ctx.outputs?.resolve({
+      field: "soiHitCounts",
+      allowPermanentAbsence: true,
+      stableIfNotFound: true,
+    });
+    if (acc === undefined) return undefined;
+    const entries = acc.mapFields((id, counts) => {
+      const value = counts?.getDataAsJson<{ nodes: number; lineages: number }>();
+      return value === undefined ? undefined : ([id, value] as const);
+    });
+    return Object.fromEntries((entries ?? []).filter((e) => e !== undefined));
+  })
+
+  /** Whether every sequence search of the last run has finished. */
+  .output("soiReady", (ctx) =>
+    ctx.outputs
+      ?.resolve({ field: "soiNodesResults", allowPermanentAbsence: true, stableIfNotFound: true })
+      ?.getIsReadyOrError(),
+  )
+
+  // Lineage axis with domain, to match a clicked row. By name: the linker has the clonotype axis first.
+  .output("lineageAxisSpec", (ctx) => {
+    const columns = ctx.outputs?.resolve("treeNodes")?.getPColumns();
+    return columns
+      ?.flatMap((column) => column.spec.axesSpec)
+      .find((axis) => axis.name === "pl7.app/clusterId");
+  })
+
+  /** Columns keyed on lineage and node, without the three-axis node-to-clonotype linker. */
+  .output("treeNodeColumns", (ctx) => {
+    const columns = ctx.outputs?.resolve("treeNodes")?.getPColumns();
+    if (columns === undefined) return undefined;
+    const nodeScoped = columns.filter((column) => column.spec.axesSpec.length === 2);
+    if (nodeScoped.length === 0) return undefined;
+    const topology = nodeScoped.find(
+      (column) => column.spec.name === "pl7.app/dendrogram/topology",
+    );
+    if (topology === undefined) return undefined;
+    const label = nodeScoped.find((column) => column.spec.name === "pl7.app/label");
+    const sequenceOf = (chain: string) =>
+      nodeScoped.find(
+        (column) =>
+          column.spec.name === "pl7.app/vdj/sequenceAlignment" &&
+          column.spec.domain?.["pl7.app/vdj/chain"] === chain,
+      );
+    const heavySequence = sequenceOf("IGHeavy");
+    const lightSequence = sequenceOf("IGLight");
+    return {
+      // For turning a node into a path: each node's parent, and its label.
+      topologyId: topology.id,
+      labelId: label?.id,
+      // Set on the member nodes of a lineage without a tree: the page shows them as a table.
+      noTreeReasonId: nodeScoped.find(
+        (column) => column.spec.name === "pl7.app/dendrogram/noTreeReason",
+      )?.id,
+      lineageAxis: getAxisId(topology.spec.axesSpec[0]),
+      nodeAxis: getAxisId(topology.spec.axesSpec[1]),
+      // The tree page colours tips by known antibody when set.
+      hasKnownProperty: nodeScoped.some(
+        (column) => column.spec.name === "pl7.app/dendrogram/isKnownAntibody",
+      ),
+      // Emitted only on runs over several datasets; the tree page colours tips by it.
+      hasDatasetProperty: nodeScoped.some(
+        (column) => column.spec.name === "pl7.app/dendrogram/dataset",
+      ),
+      // Only runs with light chains emit the light reconstructed sequence.
+      hasLightSequence: lightSequence !== undefined,
+      // What a basket copies from a node when it is added.
+      heavySequenceId: heavySequence?.id,
+      lightSequenceId: lightSequence?.id,
+      // Node-to-clonotype links, one per dataset, keyed by the run id the workflow exports under.
+      clonotypeLinks: columns
+        .filter((column) => column.spec.name === "pl7.app/dendrogram/nodeClonotype")
+        .map((column) => ({
+          id: column.id,
+          datasetKey: column.spec.axesSpec[0].domain?.["pl7.app/vdj/clonotypingRunId"] ?? "",
+          clonotypeAxis: column.spec.axesSpec[0].name,
+        })),
+    };
+  })
+
+  /** See `runIdOf`. */
+  .output("runKey", (ctx) => runIdOf(ctx.outputs))
+
+  /** Node table per opened tree, keyed by view id. */
+  .outputWithStatus("treeNodeTables", (ctx) => {
+    const views = currentViews(ctx.data.treeViews, runIdOf(ctx.outputs));
+    if (views.length === 0) return undefined;
+    const parts = nodeTableParts(nodeColumnsWithHits(ctx.outputs));
+    if (parts === undefined) return undefined;
+
+    const tables: Record<string, PlDataTableModel> = {};
+    for (const view of views) {
+      const table = nodeTable(ctx, parts, view.tableState ?? createPlDataTableStateV2(), {
+        type: "and",
+        filters: [lineageFilter(parts, view.lineageId)],
+      });
+      if (table !== undefined) tables[view.id] = table;
+    }
+    return tables;
+  })
+
+  /** Table per opened path, keyed by view id. A record: the model cannot see which section is shown. */
+  .outputWithStatus("mutationalPaths", (ctx) => {
+    const views = currentViews(ctx.data.pathViews, runIdOf(ctx.outputs)).filter(
+      (view) => view.nodeIds.length > 0,
+    );
+    if (views.length === 0) return undefined;
+    const parts = nodeTableParts(nodeColumnsWithHits(ctx.outputs));
+    if (parts === undefined) return undefined;
+
+    const tables: Record<string, PlDataTableModel> = {};
+    for (const view of views) {
+      const table = nodeTable(ctx, parts, view.tableState, {
+        type: "and",
+        filters: [lineageFilter(parts, view.lineageId), nodesFilter(parts, view.nodeIds)],
+      });
+      if (table === undefined) continue;
+      // Hide the lineage axis, the same on every row. Visibility rules match columns only.
+      const axesMeta = table.columnsMeta?.axes;
+      if (axesMeta !== undefined)
+        axesMeta[canonicalizeAxisId(parts.lineageAxis)] = { hidden: true };
+      tables[view.id] = table;
+    }
+    return tables;
+  })
+
+  /** Node table per basket, from its nodes in the run on show. None if it has no such node. */
+  .outputWithStatus("basketTables", (ctx) => {
+    const baskets = ctx.data.baskets ?? [];
+    const runKey = runIdOf(ctx.outputs);
+    if (baskets.length === 0 || runKey === undefined) return undefined;
+    const parts = nodeTableParts(nodeColumnsWithHits(ctx.outputs));
+    if (parts === undefined) return undefined;
+
+    const tables: Record<string, PlDataTableModel> = {};
+    for (const basket of baskets) {
+      // One branch per lineage: the node ids are only unique inside one.
+      const byLineage = new Map<string, string[]>();
+      for (const node of basket.nodes) {
+        if (!isCurrent(node, runKey)) continue;
+        const ids = byLineage.get(node.lineageId) ?? [];
+        ids.push(node.nodeId);
+        byLineage.set(node.lineageId, ids);
+      }
+      if (byLineage.size === 0) continue;
+      const table = nodeTable(
+        ctx,
+        parts,
+        basket.tableState ?? createPlDataTableStateV2(),
+        {
+          type: "or",
+          filters: [...byLineage.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([lineageId, nodeIds]) => ({
+              type: "and" as const,
+              filters: [lineageFilter(parts, lineageId), nodesFilter(parts, [...nodeIds].sort())],
+            })),
+        },
+        // Lineage by lineage, germline first inside each.
+        [
+          {
+            column: { type: "axis", id: parts.lineageAxis },
+            ascending: true,
+            naAndAbsentAreLeastValues: true,
+          },
+          byDepth(parts),
+        ],
+      );
+      if (table !== undefined) tables[basket.id] = table;
+    }
+    return tables;
+  })
+
+  /** Per-donor stage logs and progress. Absent on projects run before they existed. */
+  .output("allelesLogs", (ctx) => stageLogs(ctx.outputs, "allelesLogs"))
+  .output("allelesProgress", (ctx) => stageProgress(ctx.outputs, "allelesLogs"))
+  // Alignment shows as part of allele inference; its log is read only for liveness.
+  .output("alignmentsLogs", (ctx) => stageLogs(ctx.outputs, "alignmentsLogs"))
+  .output("clusteringLogs", (ctx) => stageLogs(ctx.outputs, "clusteringLogs"))
+  .output("clusteringProgress", (ctx) => stageProgress(ctx.outputs, "clusteringLogs"))
+  .output("treesLogs", (ctx) => stageLogs(ctx.outputs, "treesLogs"))
+  .output("treesProgress", (ctx) => stageProgress(ctx.outputs, "treesLogs"))
+  /** The run-wide collect step after the last donor's trees; absent on older projects. */
+  .output("collectLog", (ctx) => collectStream(ctx.outputs)?.getLogHandle())
+  .output("collectProgress", (ctx) => collectStream(ctx.outputs)?.getProgressLog(PROGRESS_PREFIX))
+
+  /** Why Run is disabled, if the settings are the reason; undefined when they can run. */
+  .output("settingsProblem", (ctx) => settingsProblem(ctx.data))
+  .output("isRunning", (ctx) => ctx.outputs?.getIsReadyOrError() === false)
+  /** A run has finished, with or without an error: an empty table then means no donors. */
+  .output("runFinished", (ctx) => ctx.outputs?.getIsReadyOrError() === true)
+
+  .subtitle((ctx) => ctx.data.customBlockLabel?.trim() || defaultSubtitle(ctx.data))
+
+  .sections((ctx) => {
+    const trees = currentViews(ctx.data.treeViews, runIdOf(ctx.outputs)).map((v) => ({
+      type: "link" as const,
+      href: `/tree?id=${encodeURIComponent(v.id)}` as const,
+      label: v.state.title,
+    }));
+    // The lineage it belongs to, and the node it ends at once one is chosen.
+    const paths = currentViews(ctx.data.pathViews, runIdOf(ctx.outputs)).map((v) => ({
+      type: "link" as const,
+      href: `/path?id=${encodeURIComponent(v.id)}` as const,
+      label: v.nodeLabel ? `Path / ${v.lineageLabel} / ${v.nodeLabel}` : `Path / ${v.lineageLabel}`,
+    }));
+    const baskets = (ctx.data.baskets ?? []).map((b) => ({
+      type: "link" as const,
+      href: `/basket?id=${b.id}` as const,
+      label: b.name,
+    }));
+    return [
+      { type: "link" as const, href: "/" as const, label: "Overview" },
+      { type: "link" as const, href: "/trees" as const, label: "Lineage table" },
+      { type: "link" as const, href: "/soi" as const, label: "Sequence search" },
+      ...(trees.length ? [{ type: "delimiter" as const }, ...trees] : []),
+      ...(paths.length ? [{ type: "delimiter" as const }, ...paths] : []),
+      ...(baskets.length ? [{ type: "delimiter" as const }, ...baskets] : []),
+    ];
+  })
+  .done();
+
+export type BlockOutputs = InferOutputsType<typeof platforma>;

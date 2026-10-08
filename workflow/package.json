@@ -1,0 +1,24 @@
+{
+  "name": "@platforma-open/milaboratories.lineage-trees.workflow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "shx rm -rf dist && pl-tengo build",
+    "check": "pl-tengo imports && pl-tengo check",
+    "format": "/usr/bin/env emacs --script ./format.el || echo 'No emacs.'",
+    "test": "pl-tengo test"
+  },
+  "dependencies": {
+    "@platforma-open/milaboratories.lineage-trees.hilary": "workspace:*",
+    "@platforma-open/milaboratories.lineage-trees.immcantation": "workspace:*",
+    "@platforma-open/milaboratories.software-mitool": "catalog:",
+    "@platforma-open/milaboratories.software-mixcr": "catalog:",
+    "@platforma-sdk/workflow-tengo": "catalog:"
+  },
+  "devDependencies": {
+    "@platforma-sdk/tengo-builder": "catalog:",
+    "@platforma-sdk/test": "catalog:",
+    "shx": "catalog:"
+  }
+}

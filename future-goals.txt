@@ -1,0 +1,22 @@
+Future goals
+
+Keep insertions with a codon-aware multiple alignment per lineage
+
+Today every lineage member is placed on its germline's positions, counted from the junction,
+and bases inserted relative to the germline are dropped (trees.R, reframe). That keeps one
+germline per lineage and whole codons for IgPhyML, but a real somatic insertion shared by a
+clade is thrown away, and it would have said something about the tree's shape.
+
+The goal: align each lineage's members to each other, codon-aware, so a shared insertion
+becomes its own columns. The tree builders would read the gap columns as missing data, and
+IgPhyML would still see whole codons.
+
+Open questions:
+- Which aligner, and how to keep it codon-aware (insertions in whole codons, frame kept).
+- How the germline is written where it has no base (a gapped germline per lineage).
+- Which insertions are real: single-base ones are mostly sequencing or alignment errors
+  (221 of 236 MiXCR insertions in one test set were one base long).
+- Cost: one alignment per lineage, on donors with tens of thousands of lineages.
+
+How often it matters, measured on 2,993 human heavy chains (Kim et al. 2022, donor 368-04):
+IgBLAST reported an insertion in 35 rows (1.2%), Change-O in none (it drops them itself).
