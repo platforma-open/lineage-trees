@@ -1072,12 +1072,13 @@ progress("Preparing lineages for tree building")
 tips_db <- db[db$is_representative, , drop = FALSE]
 
 # formatClones runs per lineage in the pool, and once here for IgPhyML lineages.
+# No regions: they assume IMGT numbering, which reframe removed, and the "hl" partition reads loci.
 format_lineages <- function(d, nproc) {
   formatClones(d, clone = "lineage_key", seq = "sequence_alignment",
                germ = "germline_alignment_d_mask", id = "tip_id",
                cell = "tip_id", locus = "locus", heavy = HEAVY,
                chain = chain, split_light = FALSE, minseq = 2,
-               collapse = FALSE, nproc = nproc)
+               collapse = FALSE, use_regions = FALSE, nproc = nproc)
 }
 
 # Both chains: per-chain omega and rate (IgPhyML), scaled branch lengths (RAxML).
