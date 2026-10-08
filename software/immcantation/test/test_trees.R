@@ -490,13 +490,15 @@ if (isTRUE(gp$ok) && isTRUE(mg$ok)) {
     "trees are built" = nrow(mg$nodes) > 0 && nrow(mg$nodes) == nrow(gp$nodes)))
 } else crashed(if (isTRUE(gp$ok)) mg else gp, "mixedgaps: runs")
 
-cat("== tiny: IgPhyML, two tips per lineage ==\n")
+cat("== tiny: IgPhyML, two tips per lineage and five in one ==\n")
 g <- run_trees("tiny")
 first <- "tiny: IgPhyML builds the trees and is recorded as the builder"
 if (g$ok) {
   built_by <- g$builders$tree_builder[nzchar(g$builders$tree_builder)]
   ok(first, nrow(g$nodes) > 0 && length(built_by) > 0 && all(built_by == "igphyml"))
   ok("tiny: IgPhyML gets one omega per chain", grepl("partition: hl", g$log))
+  observed <- table(g$nodes$lineage_id[g$nodes$is_observed == "true"])
+  ok("tiny: IgPhyML builds a five-tip lineage", any(observed >= 5))
   check_topology(g$nodes, "tiny")
   check_node_sequences(g$nodes, "tiny", light = TRUE, run = g)
   check_node_steps(g$nodes, "tiny", light = TRUE)

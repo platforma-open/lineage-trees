@@ -7,7 +7,7 @@
 #   table      heavy only, alignments on the clonotype table; deep lineage and exact copies
 #   truncated  table route with partial 5' coverage
 #   twins      one heavy chain with two light chains, both sharing one lineage
-#   tiny       two tips per lineage, for IgPhyML
+#   tiny       two tips per lineage and five in the biggest, for IgPhyML
 #   empty      a donor with no data
 #   bare       no alignment columns and no AIRR export
 
@@ -238,7 +238,9 @@ write_scenario(file.path(out_root, "mixedgaps"), mixedgaps, light, character(),
                with_light_columns = FALSE, alignments = "table")
 
 # --- tiny, empty, bare ----------------------------------------------------
-tiny <- heavy %>% group_by(clone_id) %>% slice_head(n = 2) %>% ungroup() %>% as.data.frame()
+tiny <- heavy %>% group_by(clone_id) %>%
+  filter(row_number() <= if (clone_id[1] == names(sizes)[1]) 5 else 2) %>%
+  ungroup() %>% as.data.frame()
 write_scenario(file.path(out_root, "tiny"), tiny, light, character())
 
 empty_dir <- file.path(out_root, "empty")
