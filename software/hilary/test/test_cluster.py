@@ -306,6 +306,28 @@ def main(tmp: Path) -> None:
        sorted(two["sequence_id"]) == ["a", "b"]
        and two.set_index("sequence_id").loc["a", ["known_id", "known_aa_heavy"]].tolist() == ["42", "2"])
 
+    # Alleles are inferred per donor: a clonotype in two donors shows each donor's V call on its node.
+    props = tmp / "props-collect"
+    for d in ("lineages", "nodes", "node-links", "clonotypes"):
+        (props / d).mkdir(parents=True)
+    for i, (lineage, allele) in enumerate([("L1", "IGHV1-2*02"), ("L2", "IGHV1-2*04")]):
+        write(props / "lineages" / f"donor-{i}.tsv", [
+            {"sequence_id": "0_a", "lineage_id": lineage, "link": 1, "group_id": "0_a"}])
+        write(props / "nodes" / f"donor-{i}.tsv", [{**node_row, "lineage_id": lineage, "node_id": "1",
+                                                     "is_observed": "true", "label": "0_a", "node_depth": "1"}])
+        write(props / "node-links" / f"donor-{i}.tsv", [{"lineage_id": lineage, "node_id": "1", "sequence_id": "0_a",
+                                                         "link": 1, "is_representative": "true"}])
+        write(props / "clonotypes" / f"donor-{i}.tsv", [
+            {"sequence_id": "0_a", "v_call": allele, "j_call": "IGHJ4*02", "junction": "TGTGCGAGATGG"}])
+    stage("collect", "--lineages-dir", props / "lineages", "--nodes-dir", props / "nodes",
+          "--node-links-dir", props / "node-links", "--clonotypes-dir", props / "clonotypes",
+          "--donor", "A", "--donor", "B", "--dataset", "0", "--per-dataset-dir", props / "out",
+          "--out-nodes", props / "nodes.tsv", "--out-lineage-stats", props / "stats.tsv",
+          "--out-node-properties", props / "properties.tsv")
+    v_of = read(props / "properties.tsv").set_index("lineage_id")["v_call"].to_dict()
+    ok("node properties keep each donor's V call for a clonotype in two donors",
+       v_of == {"L1": "IGHV1-2*02", "L2": "IGHV1-2*04"})
+
     # The full method compares rows base by base, so padding must not read as a difference:
     # a member with shorter 5' and 3' coverage pads with its gene's germline, not N.
     v_side, j_side = "ACGTACGTACGTAAAACCCCGGGG", "TTTGGGCCC"

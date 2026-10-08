@@ -636,17 +636,25 @@ def _lineage_descriptors(
     return described
 
 
-def _node_properties(links: pd.DataFrame, clonotypes: pd.DataFrame) -> pd.DataFrame:
+def _node_properties(links: pd.DataFrame, clonotypes: pd.DataFrame,
+                     lineages: pd.DataFrame) -> pd.DataFrame:
     """Copy each observed node's representative clonotype onto the node's axes.
 
     The dendrogram cannot follow a linker, so tooltip content must sit on the tree axes.
+    Per donor where the tables carry one: alleles are inferred per donor, so a clonotype
+    in two donors may have a different V call in each.
     """
     available = [c for c in NODE_PROPERTY_SOURCE_COLUMNS if c in clonotypes.columns]
     if "is_representative" in links.columns:
         links = links[links["is_representative"] == "true"]
-    joined = links[["lineage_id", "node_id", "sequence_id"]].merge(
-        clonotypes[["sequence_id", *available]], on="sequence_id", how="inner",
-    )
+    keys = ["sequence_id"]
+    links = links[["lineage_id", "node_id", "sequence_id"]]
+    if "donor" in clonotypes.columns:
+        keys.append("donor")
+        donor_of = (lineages.drop_duplicates("lineage_id").set_index("lineage_id")["donor"]
+                    if "donor" in lineages.columns else pd.Series(dtype=str))
+        links = links.assign(donor=links["lineage_id"].map(donor_of).fillna(""))
+    joined = links.merge(clonotypes[[*keys, *available]], on=keys, how="inner")
     for column in NODE_PROPERTY_SOURCE_COLUMNS:
         if column not in joined.columns:
             joined[column] = ""
@@ -742,7 +750,10 @@ def _write_per_dataset(
 
 
 def _read_clonotypes(args: argparse.Namespace, donors: list) -> pd.DataFrame:
-    """The clonotypes the tools saw, with merge's dataset name and known antibody flag joined back."""
+    """The clonotypes the tools saw, with merge's dataset name and known antibody flag joined back.
+
+    From per-donor files, one row per donor and clonotype, with a `donor` column.
+    """
     clonotypes = _read_clonotype_tables(args, donors)
     annotations = getattr(args, "annotations", None)
     if annotations is None or not annotations.exists():
@@ -756,11 +767,12 @@ def _read_clonotype_tables(args: argparse.Namespace, donors: list) -> pd.DataFra
     """Per-donor files (with realigned calls) if given, else the merged file."""
     if args.clonotypes_dir is not None:
         parts = [_read_donor_file(args.clonotypes_dir, index, ["sequence_id"])
-                 for index in range(len(donors))]
+                 .assign(donor="" if donor is None else donor)
+                 for index, donor in enumerate(donors)]
         frames = [f.fillna("") for f in parts if not f.empty]
         if not frames:
-            return pd.DataFrame(columns=["sequence_id"])
-        return pd.concat(frames, ignore_index=True).drop_duplicates("sequence_id")
+            return pd.DataFrame(columns=["sequence_id", "donor"])
+        return pd.concat(frames, ignore_index=True)
     if args.clonotypes is not None:
         return pd.read_csv(args.clonotypes, sep="\t", dtype=str, keep_default_na=False)
     return pd.DataFrame(columns=["sequence_id"])
@@ -889,7 +901,9 @@ def collect(args: argparse.Namespace) -> None:
     nodes = _concat(node_parts, NODE_COLUMNS)
     # Tip labels are prefixed clonotype ids; strip the prefix.
     links = _concat(link_parts, NODE_LINK_FILE_COLUMNS)
-    clonotypes = _read_clonotypes(args, donors)
+    donor_clonotypes = _read_clonotypes(args, donors)
+    # One row per clonotype for everything but the node properties, which keep each donor's calls.
+    clonotypes = donor_clonotypes.drop_duplicates("sequence_id").drop(columns="donor", errors="ignore")
     builders = _concat(builder_parts, BUILDER_COLUMNS)
     nodes, links = _add_member_nodes(lineages, nodes, links, builders, clonotypes)
     step("Labelling nodes")
@@ -899,7 +913,8 @@ def collect(args: argparse.Namespace) -> None:
         nodes["label"] = _short_labels(nodes, links, clonotypes)
     nodes.to_csv(args.out_nodes, sep="\t", index=False)
     if args.out_node_properties is not None:
-        _node_properties(links, clonotypes).to_csv(args.out_node_properties, sep="\t", index=False)
+        _node_properties(links, donor_clonotypes, lineages).to_csv(
+            args.out_node_properties, sep="\t", index=False)
 
     step("Summarising lineages")
     # cluster_size: distinct sequences (tree step groups). tip_count: tips actually
