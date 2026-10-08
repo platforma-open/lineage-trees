@@ -578,7 +578,7 @@ wf.body(func(args) {
 				domain: { "pl7.app/vdj/feature": "CDR3", "pl7.app/alphabet": "aminoacid" },
 				annotations: {
 					"pl7.app/label": "CDR3 length, aa",
-					"pl7.app/description": "Length of the heavy chain CDR3 in amino acids. Shared by every member of the lineage.",
+					"pl7.app/description": "Heavy chain CDR3 length in amino acids, shared by every member of the lineage",
 					"pl7.app/table/orderPriority": "89300"
 				}
 			}
@@ -694,14 +694,14 @@ wf.body(func(args) {
 				}
 			}
 		}, {
-			// The lineage id carries the donor as a prefix.
+			// The lineage id carries the donor as a prefix; the label drops it.
 			column: "lineage_label",
 			spec: {
 				name: "pl7.app/label",
 				valueType: "String",
 				annotations: {
 					"pl7.app/label": "Lineage",
-					"pl7.app/description": "The lineage's id within its donor."
+					"pl7.app/description": "The lineage's id."
 				}
 			}
 		})
@@ -761,7 +761,7 @@ wf.body(func(args) {
 				valueType: "String",
 				annotations: {
 					"pl7.app/label": "Tree builder",
-					"pl7.app/description": "Which program built the tree, which decides the unit of its branch lengths: fasttree-raxml counts substitutions per nucleotide site, parsimony counts changes per nucleotide site of the lineage's alignment, IgPhyML counts substitutions per codon site. A fasttree-raxml tree has FastTree's topology with RAxML's branch lengths and ancestral sequences.",
+					"pl7.app/description": "Program that built the tree. fasttree-raxml is a fast likelihood model. IgPhyML is a slower likelihood model that accounts for somatic hypermutation. pratchet is parsimony, used for lineages under 3 tips or when the other builders fail.",
 					"pl7.app/isDiscreteFilter": "true",
 					"pl7.app/discreteValues": "['fasttree-raxml', 'igphyml', 'pratchet']",
 					"pl7.app/table/orderPriority": "87000"

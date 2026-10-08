@@ -91,10 +91,8 @@ const adaptiveNoteOpen = ref(true);
     :placeholder="knownOff ? 'Pick two or more datasets' : 'None'"
   >
     <template #tooltip>
-      Datasets of antibodies whose relatives you are looking for in the others, such as
-      characterised leads or hits from a screen. Their clonotypes are clustered with everything
-      else: every lineage says how many it holds, and every other member of such a lineage gets its
-      distance along the tree to the nearest known antibody, which is exported for ranking.
+      Antibodies whose relatives you are looking for, such as leads or screening hits. Every other
+      lineage member gets its tree distance to the nearest one.
     </template>
   </PlDropdownMultiRef>
   <PlAlert v-if="unaligned.length > 0" type="warn">
@@ -200,7 +198,7 @@ const adaptiveNoteOpen = ref(true);
         <template #tooltip>
           Which lineages IgPhyML builds instead of FastTree and RAxML. Its HLP19 codon model
           accounts for the context-dependent hotspot biases of somatic hypermutation and resolves
-          topology better, but it is far slower.
+          topology better, but it is <b>far slower</b>.
         </template>
       </PlDropdown>
       <PlNumberField
