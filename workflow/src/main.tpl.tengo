@@ -411,24 +411,6 @@ wf.body(func(args) {
 		librariesById[entry.spec.domain["pl7.app/vdj/libraryId"]] = entry
 	}
 	libraryByDataset := {}
-	// Datasets on one sample axis pool their expansion under the first, so one plot shows them all.
-	// Keyed as per-donor keys a sample axis.
-	expansionFirst := {}
-	pooledCount := {}
-	firstByAxis := {}
-	for ds in datasets {
-		axisId := ds.sampleAxisSpec.name
-		domain := is_undefined(ds.sampleAxisSpec.domain) ? {} : ds.sampleAxisSpec.domain
-		for k in maps.getKeys(domain) {
-			axisId += "|" + k + "=" + domain[k]
-		}
-		if is_undefined(firstByAxis[axisId]) {
-			firstByAxis[axisId] = string(ds.index)
-		}
-		first := firstByAxis[axisId]
-		expansionFirst[string(ds.index)] = first
-		pooledCount[first] = (is_undefined(pooledCount[first]) ? 0 : pooledCount[first]) + 1
-	}
 	datasetParams := []
 	for ds in datasets {
 		idx := string(ds.index)
@@ -453,7 +435,6 @@ wf.body(func(args) {
 			fromMixcr: ds.alignmentSource == "mixcr",
 			libraryFile: libraryFile,
 			isKnown: ds.isKnown,
-			expansionFirst: expansionFirst[idx],
 			// Matched against the donor column's axis to find which datasets it reaches.
 			sampleAxis: {
 				name: ds.sampleAxisSpec.name,
@@ -1170,7 +1151,6 @@ wf.body(func(args) {
 	lineageLinks := {}
 	nodeClonotypeLinks := {}
 	germlineMutations := {}
-	expansion := {}
 	memberCounts := {}
 	knownDistances := {}
 	// AA mutations along the tree to the nearest known antibody (chosen by heavy), per chain.
@@ -1357,40 +1337,6 @@ wf.body(func(args) {
 				}
 			}]
 		}, { splitDataAndSpec: true })), func(key, value) { nodeClonotypeLinks[key] = value })
-
-		// Only the first dataset on a sample axis carries the pooled table; it is no one dataset's.
-		if expansionFirst[idx] == idx {
-			maps.forEach(traced(pooledCount[idx] > 1 ? blockTrace : dsTrace, xsv.importFile(perDonor.output("expansion-" + idx), "tsv", {
-				axes: [
-					{ column: "sample_id", spec: ds.sampleAxisSpec },
-					{ column: "lineage_id", spec: lineageAxisSpec }
-				],
-				columns: [{
-					column: "size_rank",
-					id: "sizeRank." + ds.key,
-					spec: {
-						name: "pl7.app/clustering/sizeRank",
-						valueType: "Int",
-						annotations: {
-							"pl7.app/label": "Lineage size rank",
-							"pl7.app/min": "1"
-						}
-					}
-				}, {
-					column: "abundance_percent",
-					id: "abundancePercent." + ds.key,
-					spec: {
-						name: "pl7.app/clustering/abundancePercent",
-						valueType: "Double",
-						annotations: {
-							"pl7.app/label": "Lineage frequency, %",
-							"pl7.app/min": "0",
-							"pl7.app/max": "100"
-						}
-					}
-				}]
-			}, { splitDataAndSpec: true })), func(key, value) { expansion[key] = value })
-		}
 	}
 
 	// `maps.forEach` walks sorted keys. Add order determines the built resource, so plain
@@ -1413,10 +1359,6 @@ wf.body(func(args) {
 	maps.forEach(nodeAbundance, add(treeNodesFrameBuilder))
 	maps.forEach(nodeClonotypeLinks, add(treeNodesFrameBuilder))
 	treeNodesFrame := treeNodesFrameBuilder.build()
-
-	expansionFrameBuilder := pframes.pFrameBuilder()
-	maps.forEach(expansion, add(expansionFrameBuilder))
-	expansionFrame := expansionFrameBuilder.build()
 
 	// The lineage axis's label for other blocks, so tables reaching it through the clonotype
 	// link show the id. The full id: with a donor column it carries the donor, unique across donors.
@@ -1507,7 +1449,6 @@ wf.body(func(args) {
 			donorStats: perDonor.output("donorStats"),
 			// Content id of the trees; views and baskets are scoped to it.
 			runId: perDonor.output("runId"),
-			expansionPlot: pframes.exportFrame(expansionFrame),
 			treeNodes: pframes.exportFrame(treeNodesFrame),
 			mergeLog: merged.getStdoutContent(),
 			// Clonotypes per V and J gene per dataset; the model checks the datasets name genes alike.

@@ -27,7 +27,6 @@ PER_DATASET := {
 	"lineages": "lineages",
 	"nodeLinks": "node-links",
 	"germlineMutations": "germline-mutations",
-	"expansion": "expansion",
 	"memberCounts": "member-counts",
 	"knownDistances": "known-distances"
 }
@@ -75,9 +74,6 @@ self.body(func(inputs) {
 		// So link files exist for every picked pair, even ones the data leaves empty.
 		if ds.isKnown {
 			collectCmd.arg("--known").arg(ds.index)
-		}
-		if ds.expansionFirst != ds.index {
-			collectCmd.arg("--expansion-group").arg(ds.index).arg(ds.expansionFirst)
 		}
 	}
 	maps.forEach(inputs.sampleMetadata, func(index, file) {

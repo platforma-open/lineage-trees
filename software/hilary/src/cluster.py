@@ -25,7 +25,6 @@ Stages, in workflow order:
              lineages-<i>.tsv            sequence_id, lineage_id, link
              node-links-<i>.tsv          node-to-clonotype linker
              germline-mutations-<i>.tsv  sequence_id, germline_mutation_count
-             expansion-<i>.tsv           sample_id, lineage_id, size_rank, abundance_percent
              member-counts-<i>.tsv       lineage_id, member_count
              known-distances-<i>.tsv    sequence_id, known_id, per-chain aa and nt
                                          mutations to that known antibody
@@ -450,35 +449,6 @@ def cluster(args: argparse.Namespace) -> None:
     clones.to_csv(args.out_clones, sep="\t", index=False)
 
 
-def _pooled_samples(present: pd.DataFrame, groups: list[list[str]]) -> pd.DataFrame:
-    """Datasets on one sample axis share their samples: each takes its group's first dataset's prefix."""
-    leader = dict(groups)
-    if not leader or present.empty:
-        return present
-    index = dataset_of(present["sample_id"])
-    return present.assign(
-        sample_id=index.map(lambda i: leader.get(i, i)) + DATASET_SEP + unprefixed(present["sample_id"]))
-
-
-def _expansion(present: pd.DataFrame) -> pd.DataFrame:
-    """Per-sample lineage size rank and each lineage's share of the sample's abundance."""
-    sized = (
-        present.assign(abundance=pd.to_numeric(present["abundance"], errors="coerce").fillna(0.0))
-        .groupby(["sample_id", "lineage_id"], as_index=False)["abundance"]
-        .sum()
-    )
-    # Lineage id breaks ties so the ranking does not depend on row order.
-    sized = sized.sort_values(
-        ["sample_id", "abundance", "lineage_id"],
-        ascending=[True, False, True],
-    )
-    grouped = sized.groupby("sample_id", sort=False)
-    sized["size_rank"] = grouped.cumcount() + 1
-    totals = grouped["abundance"].transform("sum")
-    sized["abundance_percent"] = sized["abundance"].div(totals.where(totals > 0)).mul(100.0)
-    return sized[["sample_id", "lineage_id", "size_rank", "abundance_percent"]]
-
-
 def _read_donor_file(directory: Path, index: int, columns: list[str]) -> pd.DataFrame:
     """Read one donor's table, tolerating a donor that produced nothing."""
     path = directory / f"donor-{index}.tsv"
@@ -711,7 +681,6 @@ def _write_per_dataset(
     args: argparse.Namespace,
     lineages: pd.DataFrame,
     links: pd.DataFrame,
-    expansion: pd.DataFrame,
     known_distances: pd.DataFrame,
     germline_mutations: pd.DataFrame,
     known_labels: pd.Series,
@@ -744,8 +713,6 @@ def _write_per_dataset(
         _write_one_per_clonotype(slice_of(germline_mutations, index, "sequence_id"), sizes,
                                  out / f"germline-mutations-{index}.tsv",
                                  GERMLINE_MUTATION_OUT_COLUMNS)
-        slice_of(expansion, index, "sample_id").to_csv(
-            out / f"expansion-{index}.tsv", sep="\t", index=False)
         distances = slice_of(known_distances, index, "sequence_id")
         # Candidate-to-known antibody links, one file per known antibody dataset, written even if empty.
         for known_index in args.known:
@@ -974,11 +941,6 @@ def collect(args: argparse.Namespace) -> None:
             present = abundance.merge(lineages, on="sequence_id", how="inner")
         dataset_total = float(pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0).sum())
         present = present.assign(abundance=pd.to_numeric(present["abundance"], errors="coerce").fillna(0))
-        expansion = _expansion(_pooled_samples(present, args.expansion_group))
-    else:
-        expansion = pd.DataFrame(
-            columns=["sample_id", "lineage_id", "size_rank", "abundance_percent"]
-        )
     if args.out_node_metadata is not None:
         _node_metadata(args, present, links).to_csv(args.out_node_metadata, sep="\t", index=False)
     if args.out_node_abundance is not None:
@@ -1012,7 +974,7 @@ def collect(args: argparse.Namespace) -> None:
     known_labels = (
         clonotypes.drop_duplicates("sequence_id").set_index("sequence_id")["clone_label"]
         if "clone_label" in clonotypes.columns else pd.Series(dtype=str))
-    _write_per_dataset(args, lineages, links, expansion,
+    _write_per_dataset(args, lineages, links,
                        _concat(distance_parts, KNOWN_DISTANCE_COLUMNS),
                        _concat(germline_parts, GERMLINE_MUTATION_COLUMNS), known_labels)
 
@@ -1150,8 +1112,6 @@ def main() -> None:
     k.add_argument("--sample-metadata", action="append", nargs=2, default=[], metavar=("INDEX", "PATH"),
                    help="a dataset's sample_id plus meta_<k> columns; repeat once per dataset")
     k.add_argument("--out-node-metadata", type=Path)
-    k.add_argument("--expansion-group", action="append", nargs=2, default=[], metavar=("INDEX", "FIRST"),
-                   help="a dataset whose expansion pools into another's, both on one sample axis")
     k.add_argument(
         "--known",
         action="append",

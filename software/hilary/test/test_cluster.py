@@ -172,15 +172,6 @@ def main(tmp: Path) -> None:
        set(members["sequence_id"]) == {"xigh", "g-ig", "paired", "vdiff", "jdiff", "far", "both"})
     ok("the clonotype in two donors holds a lineage in each",
        set(members.loc[members["sequence_id"] == "both", "lineage_id"]) == {a["0_both"], b["0_both"]})
-    expansion = read(out / "expansion-0.tsv")
-    s1 = expansion[expansion["sample_id"] == "s1"].set_index("lineage_id")
-    ok("expansion ranks a sample's lineages by abundance",
-       s1.loc[a["0_xigh"], "size_rank"] == "1" and s1.loc[a["0_both"], "size_rank"] == "2")
-    ok("and gives each its share of the sample",
-       abs(float(s1.loc[a["0_xigh"], "abundance_percent"]) - 72.0) < 1e-6)
-    s2 = expansion[expansion["sample_id"] == "s2"]
-    ok("a sample's counts go to its own donor's lineage alone",
-       list(s2["lineage_id"]) == [b["0_both"]] and float(s2["abundance_percent"].iloc[0]) == 100.0)
     stats = read(tmp / "lineage-stats.tsv").set_index("lineage_id")
     ok("lineage stats name the donor and show the id without it",
        stats.loc[a["0_xigh"], "donor"] == "A"
@@ -202,17 +193,6 @@ def main(tmp: Path) -> None:
     got = cluster._node_metadata(argparse.Namespace(sample_metadata=[("0", meta)]), present, links)
     ok("node metadata with nothing placed still carries the count columns",
        list(got.columns) == ["lineage_id", "node_id", "timepoint", "timepoint__count"])
-
-    # Two datasets on one sample axis: a shared sample's counts add up under the first.
-    shared = pd.DataFrame({"sample_id": ["0_s1", "1_s1", "1_s2"], "sequence_id": ["0_c1", "1_c1", "1_c2"],
-                           "lineage_id": ["L1", "L1", "L2"], "abundance": [1.0, 3.0, 2.0]})
-    pooled = cluster._expansion(cluster._pooled_samples(shared, [["1", "0"]])).set_index("sample_id")
-    ok("datasets on one sample axis pool a shared sample's expansion under the first",
-       set(pooled.index) == {"0_s1", "0_s2"} and pooled.loc["0_s1", "abundance_percent"] == 100.0
-       and pooled.loc["0_s1", "size_rank"] == 1)
-    alone = cluster._expansion(cluster._pooled_samples(shared, []))
-    ok("and without a group each dataset keeps its own samples",
-       set(alone["sample_id"]) == {"0_s1", "1_s1", "1_s2"})
 
     # Adaptive mode on a donor with no V, J and CDR3-length group of two: HILARy raises a
     # KeyError there, so each clonotype becomes its own lineage and the method says so.

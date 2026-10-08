@@ -260,7 +260,7 @@ self.body(func(inputs) {
 		if ds.hasSampleMetadata {
 			sampleMetadata[ds.index] = inputs.sampleMetadata[ds.index]
 		}
-		collectDatasets = append(collectDatasets, { index: ds.index, isKnown: ds.isKnown, expansionFirst: ds.expansionFirst })
+		collectDatasets = append(collectDatasets, { index: ds.index, isKnown: ds.isKnown })
 	}
 	collected := outputsOf("collect", render.create(collectTpl, {
 		abundance: inputs.abundanceTable,
@@ -294,7 +294,7 @@ self.body(func(inputs) {
 	}
 	for ds in params.datasets {
 		idx := ds.index
-		for key in ["lineages", "nodeLinks", "germlineMutations", "expansion", "memberCounts", "knownDistances"] {
+		for key in ["lineages", "nodeLinks", "germlineMutations", "memberCounts", "knownDistances"] {
 			outputs[key + "-" + idx] = collected.perDataset.getFutureInputField(key + "-" + idx)
 		}
 		// Per dataset pair: a known antibody id only means something with its issuing dataset.

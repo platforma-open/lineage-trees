@@ -118,8 +118,6 @@ export type BlockData = {
     nodeIds: string[];
     tableState: PlDataTableStateV2;
   }[];
-  /** UI-only, never projected. */
-  expansionGraphState: GraphMakerState;
   /** Named sets of collected nodes, one section each. Their clonotypes are projected as `BlockArgs.baskets`. Absent on older projects. */
   baskets: NodeBasket[];
   /** Subtitle the user typed; empty or absent falls back to `defaultSubtitle`. Absent on older projects. */
@@ -507,15 +505,6 @@ export function defaultBlockData(
     treeViews: [],
     pathViews: [],
     baskets: [],
-    expansionGraphState: {
-      title: "Lineage expansion",
-      template: "curve",
-      // Log axes: rank against abundance is a power law.
-      axesSettings: {
-        axisX: { scale: "log", gridlines: false },
-        axisY: { scale: "log", gridlines: true },
-      },
-    },
   };
 }
 
@@ -850,13 +839,6 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     });
   })
 
-  // createPFrameForGraphs adds the related pool columns GraphMaker needs.
-  .outputWithStatus("expansionPlot", (ctx) => {
-    const columns = ctx.outputs?.resolve("expansionPlot")?.getPColumns();
-    if (columns === undefined || columns.length === 0) return undefined;
-    return createPFrameForGraphs(ctx, columns);
-  })
-
   // Raw stdout, not JSON. getDataAsString gives undefined while empty.
   .output("clusteringLog", (ctx) => ctx.outputs?.resolve("clusteringLog")?.getDataAsString())
 
@@ -1113,7 +1095,6 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     }));
     return [
       { type: "link" as const, href: "/" as const, label: "Overview" },
-      { type: "link" as const, href: "/expansion" as const, label: "Lineage expansion plot" },
       { type: "link" as const, href: "/trees" as const, label: "Lineage table" },
       { type: "link" as const, href: "/soi" as const, label: "Sequence search" },
       ...(trees.length ? [{ type: "delimiter" as const }, ...trees] : []),
