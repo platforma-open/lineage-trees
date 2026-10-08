@@ -536,6 +536,129 @@ quit(status = 0)
 # Trees stage, from the align stage's table.
 suppressMessages({library(dowser); library(ape); library(dplyr)})
 
+# dowser 2.5.1's rerootTree checks its work with tips x tips and nodes x nodes distance matrices,
+# 14 GiB at 10,000 tips, and setNodeDivergences takes one row of another. Below, the same
+# rerooting with only the tree length check, and divergences read off root depths. Installed into
+# dowser's namespace here and in each tree worker, so its builders call them.
+lean_reroot <- function(tree, germline, min = 0.001, verbose = 1) {
+  ntip <- length(tree$tip.label)
+  uca <- ntip + 1
+  if (!germline %in% tree$tip.label) {
+    stop(paste(germline, "not found in tip labels!"))
+  }
+  olength <- sum(tree$edge.length)
+  if (ape::is.rooted(tree)) {
+    if (verbose > 0) {
+      print("unrooting tree!")
+    }
+    root <- ape::getMRCA(tree, tip = tree$tip.label)
+    max <- max(tree$edge)
+    rindex <- tree$edge[, 1] == root
+    redge <- tree$edge[rindex, ]
+    parent <- redge[1, 2]
+    child <- redge[2, 2]
+    if (parent <= length(tree$tip.label)) {
+      parent <- redge[2, 2]
+      child <- redge[1, 2]
+    }
+    if (tree$tip.label[child] == germline && tree$edge.length[tree$edge[, 1] == root & tree$edge[, 2] == child] <= min) {
+      if (verbose > 0) {
+        print("tree already rooted at germline!")
+      }
+      return(tree)
+    }
+    warning("Rooting already rooted trees not fully supported.")
+    tree$edge <- tree$edge[!rindex, ]
+    tree$edge <- rbind(tree$edge, c(parent, child))
+    sumedge <- sum(tree$edge.length[rindex])
+    tree$edge.length <- tree$edge.length[!rindex]
+    tree$edge.length[length(tree$edge.length) + 1] <- sumedge
+    tree$Nnode <- tree$Nnode - 1
+    if (parent != uca) {
+      if (uca %in% tree$edge) {
+        stop("something weird happened during unrooting")
+      }
+      root <- parent
+      tree$edge[tree$edge[, 1] == parent, 1] <- uca
+      tree$edge[tree$edge[, 2] == parent, 2] <- uca
+      if (!is.null(tree$nodes)) {
+        s <- tree$nodes[[uca]]
+        tree$nodes[[uca]] <- tree$nodes[[parent]]
+        tree$nodes[[parent]] <- s
+      }
+    }
+    tree$edge[tree$edge[, 1] == max, 1] <- root
+    tree$edge[tree$edge[, 2] == max, 2] <- root
+    if (!is.null(tree$nodes)) {
+      tree$nodes[[max]] <- tree$nodes[[root]]
+      tree$nodes[[max]] <- NULL
+    }
+  }
+  edge <- tree$edge
+  germid <- which(tree$tip.label == germline)
+  max <- max(edge)
+  nnode <- max + 1
+  uca <- ntip + 1
+  edge[edge[, 1] == uca, 1] <- nnode
+  edge[edge[, 2] == uca, 2] <- nnode
+  edge[edge[, 2] == germid, 2] <- uca
+  edge <- rbind(edge, c(uca, germid))
+  tree$edge.length[length(tree$edge.length) + 1] <- 0
+  swap <- function(tnode, edge, checked) {
+    if (tnode %in% checked) {
+      print("r edge")
+      return(edge)
+    }
+    checked <- c(checked, tnode)
+    children <- edge[edge[, 1] == tnode, 2]
+    parent <- edge[edge[, 2] == tnode, 1]
+    if (length(children) < 2 || sum(!parent %in% checked) > 0) {
+      parent <- edge[edge[, 2] == tnode, 1]
+      parent <- parent[!parent %in% checked]
+      edge[edge[, 1] == parent & edge[, 2] == tnode, ] <- c(tnode, parent)
+      children <- edge[edge[, 1] == tnode, 2]
+    }
+    for (tnode in children) {
+      if (!tnode %in% checked) {
+        edge <- swap(tnode, edge, checked)
+      }
+    }
+    return(edge)
+  }
+  edge <- swap(uca, edge, checked = c(1:ntip))
+  tree$edge <- edge
+  tree$Nnode <- length(unique(edge[, 1]))
+  tree <- ape::reorder.phylo(tree, "postorder")
+  if (!is.null(tree$nodes)) {
+    tree$nodes[[nnode]] <- tree$nodes[[uca]]
+    tree$nodes[[uca]] <- tree$nodes[[germid]]
+  }
+  attr(tree, "order") <- NULL
+  tree <- ape::ladderize(tree, right = FALSE)
+  nlength <- sum(tree$edge.length)
+  if (abs(nlength - olength) > 0.001) {
+    stop(paste("Error in rerooting tree", tree$name, "tree length not consistent"))
+  }
+  return(tree)
+}
+dowser_node_divergences <- dowser:::setNodeDivergences
+lean_node_divergences <- function(tree) {
+  ntip <- length(tree$tip.label)
+  # Root depth is distance from the tips' common ancestor only when that ancestor is the root.
+  if (ape::getMRCA(tree, tip = tree$tip.label) != ntip + 1) return(dowser_node_divergences(tree))
+  if (is.null(tree$nodes)) {
+    tree$nodes <- lapply(seq_len(ntip + tree$Nnode), function(x) list(sequence = NA))
+  }
+  divs <- ape::node.depth.edgelength(tree)
+  for (i in seq_along(divs)) tree$nodes[[i]]$divergence <- divs[i]
+  tree
+}
+use_lean_dowser <- function() {
+  utils::assignInNamespace("rerootTree", lean_reroot, "dowser")
+  utils::assignInNamespace("setNodeDivergences", lean_node_divergences, "dowser")
+}
+use_lean_dowser()
+
 if (is.null(aligned_in_path)) stop("missing --aligned")
 joined <- read_tsv(aligned_in_path)
 if (!nrow(joined)) finish_empty("no clonotype carries a heavy chain alignment")
@@ -980,7 +1103,7 @@ attempt_build <- function(build, p, on, nproc) {
   tryCatch(
     if (build == "igphyml") {
       # Also buildIgphyml's default; named to show the shared threshold.
-      getTrees(on, build = "igphyml", exec = igphyml, nproc = nproc, quiet = 1,
+      getTrees(on, build = "igphyml", check_divergence = FALSE, exec = igphyml, nproc = nproc, quiet = 1,
                partition = p, asrc = ASR_CREDIBLE_MASS, rseed = TREE_SEED)
     } else if (build == "raxml") {
       # Dowser deletes RAxML's working files, which hold the marginals, so use our own dir.
@@ -988,11 +1111,11 @@ attempt_build <- function(build, p, on, nproc) {
       dir <- tempfile("raxml-")
       on.exit(unlink(dir, recursive = TRUE), add = TRUE)
       rethreshold_raxml(
-        getTrees(on, build = "raxml", exec = raxml, nproc = nproc, quiet = 1,
+        getTrees(on, build = "raxml", check_divergence = FALSE, exec = raxml, nproc = nproc, quiet = 1,
                  partition = p, dir = dir, id = run_id, rm_temp = FALSE, rseed = TREE_SEED),
         dir, run_id)
     } else {
-      getTrees(on, build = "pratchet", nproc = nproc, quiet = 1)
+      getTrees(on, build = "pratchet", check_divergence = FALSE, nproc = nproc, quiet = 1)
     },
     error = function(e) e)
 }
@@ -1280,7 +1403,8 @@ process_unit <- function(u) {
 }
 
 # What a worker needs besides dowser: the functions above and what they read.
-POOL_EXPORTS <- c("attempt_build", "usable_build", "why_build", "build_lineage",
+POOL_EXPORTS <- c("lean_reroot", "dowser_node_divergences", "lean_node_divergences",
+                  "use_lean_dowser", "attempt_build", "usable_build", "why_build", "build_lineage",
                   "collapse_tree", "tree_rows", "finish_lineage", "process_unit",
                   "route_lineage", "format_lineages", "partition_for", "chain", "HEAVY",
                   "lineage_seed", "TREE_SEED", "TIP_REAL",
@@ -1511,6 +1635,7 @@ if (length(units)) {
     NULL
   })
   parallel::clusterExport(cl, POOL_EXPORTS)
+  parallel::clusterEvalQ(cl, use_lean_dowser())
   finished <- c(finished, run_pool(cl, units))
   parallel::stopCluster(cl)
   rm(units)
