@@ -1396,6 +1396,13 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
       })
       known <- do.call(rbind, rows)
     }
+    # Each known antibody at zero from itself, for the copies sharing its tip; dropped once copied.
+    known <- rbind(known, data.frame(
+      sequence_id = labels[known_here], known_id = labels[known_here],
+      known_aa_heavy = 0L, known_nt_heavy = 0L,
+      known_aa_light = if (is.null(costs$light)) NA_integer_ else ifelse(carries$light[known_here], 0L, NA_integer_),
+      known_nt_light = if (is.null(costs$light)) NA_integer_ else ifelse(carries$light[known_here], 0L, NA_integer_),
+      stringsAsFactors = FALSE))
   }
 
   # Ids in the order a walk of the ladderized tree meets the nodes, smaller clades first: the
@@ -1823,6 +1830,14 @@ if (!is.null(known_path)) {
   distances <- if (length(known_rows)) do.call(rbind, known_rows) else
     as.data.frame(setNames(replicate(length(KNOWN_COLUMNS), character(0), simplify = FALSE),
                            KNOWN_COLUMNS))
+  # Copies sharing a tip share its score: a candidate's, or zero to the known antibody they copy.
+  group_of_id <- setNames(group_members$group_id, group_members$sequence_id)
+  copies <- group_members[!group_members$is_representative & !(group_members$sequence_id %in% known_ids), ]
+  from <- match(copies$group_id, group_of_id[distances$sequence_id])
+  shared <- distances[from[!is.na(from)], , drop = FALSE]
+  shared$sequence_id <- copies$sequence_id[!is.na(from)]
+  distances <- rbind(distances, shared)
+  distances <- distances[!(distances$sequence_id %in% known_ids), , drop = FALSE]
   write.table(distances, known_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
   cat(sprintf("known antibody distances: %d clonotypes measured in %d lineages holding a known antibody\n",
               nrow(distances), length(known_rows)))

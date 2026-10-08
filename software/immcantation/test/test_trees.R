@@ -445,6 +445,14 @@ if (tb$ok) {
     "links" = setequal(nodes_of$sequence_id, duplicated_ids) &&
       length(unique(paste(nodes_of$lineage_id, nodes_of$node_id))) == 2,
     "representative" = length(rep_of) == 2 && known_id %in% rep_of))
+  copied <- setdiff(duplicated_ids, known_id)
+  at <- function(id, col) suppressWarnings(as.integer(tb$known[[col]][tb$known$sequence_id == id]))
+  same_tip_as_known <- copied[groups[copied] == groups[known_id]]
+  ok_all("table: copies share their tip's score", list(
+    "every copy scored once" = all(copied %in% tb$known$sequence_id) && !any(duplicated(tb$known$sequence_id)),
+    "a known antibody's copy is at zero" = length(same_tip_as_known) == 1 &&
+      at(same_tip_as_known, "known_aa_heavy") == 0 && at(same_tip_as_known, "known_nt_heavy") == 0,
+    "known antibodies themselves are not scored" = !(known_id %in% tb$known$sequence_id)))
   ok("table: heavy-only known antibody relatives have no light figure",
      nrow(tb$known) > 0 && all(tb$known$known_id == known_id) &&
        all(is.na(suppressWarnings(as.integer(tb$known$known_nt_light)))))
