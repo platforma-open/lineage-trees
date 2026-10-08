@@ -540,6 +540,95 @@ suppressMessages({library(dowser); library(ape); library(dplyr)})
 # 14 GiB at 10,000 tips, and setNodeDivergences takes one row of another. Below, the same
 # rerooting with only the tree length check, and divergences read off root depths. Installed into
 # dowser's namespace here and in each tree worker, so its builders call them.
+# ape 5.8.1 orders edges with recursive C++, which overflows the stack on deep trees. Its
+# cladewise and postorder orders, from an explicit stack; equal to ape's on every other tree.
+edge_order <- function(edge, ntip, postorder) {
+  nedge <- nrow(edge)
+  out_edges <- split(seq_len(nedge), factor(edge[, 1], levels = seq_len(max(edge))))
+  order <- integer(nedge)
+  stack <- integer(nedge + 1L)
+  done <- 0L
+  if (postorder) {
+    # ape fills a node's edges from the end, then each child in turn: the reverse of this walk.
+    stack[1] <- ntip + 1L
+    top <- 1L
+    while (top > 0L) {
+      v <- stack[top]
+      top <- top - 1L
+      own <- out_edges[[v]]
+      order[done + seq_along(own)] <- rev(own)
+      done <- done + length(own)
+      inner <- rev(edge[own, 2][edge[own, 2] > ntip])
+      stack[top + seq_along(inner)] <- inner
+      top <- top + length(inner)
+    }
+    return(rev(order))
+  }
+  first <- rev(out_edges[[ntip + 1L]])
+  stack[seq_along(first)] <- first
+  top <- length(first)
+  while (top > 0L) {
+    e <- stack[top]
+    top <- top - 1L
+    done <- done + 1L
+    order[done] <- e
+    child <- edge[e, 2]
+    if (child > ntip) {
+      below <- rev(out_edges[[child]])
+      stack[top + seq_along(below)] <- below
+      top <- top + length(below)
+    }
+  }
+  order
+}
+# ape::reorder.phylo for "postorder" or "cladewise", including leaving one-node trees alone.
+reorder_edges <- function(tree, postorder) {
+  wanted <- if (postorder) "postorder" else "cladewise"
+  if (identical(attr(tree, "order"), wanted) || tree$Nnode == 1) return(tree)
+  i <- edge_order(tree$edge, length(tree$tip.label), postorder)
+  tree$edge <- tree$edge[i, , drop = FALSE]
+  if (!is.null(tree$edge.length)) tree$edge.length <- tree$edge.length[i]
+  attr(tree, "order") <- wanted
+  tree
+}
+# ape::ladderize on those orders; tip counts per node summed in postorder, as ape's node_depth.
+lean_ladderize <- function(phy, right = TRUE) {
+  if (!is.null(phy$edge.length)) {
+    el <- numeric(max(phy$edge))
+    el[phy$edge[, 2]] <- phy$edge.length
+  }
+  nb.tip <- length(phy$tip.label)
+  nb.node <- phy$Nnode
+  phy <- reorder_edges(phy, TRUE)
+  N <- c(rep(1, nb.tip), numeric(nb.node))
+  for (i in seq_len(nrow(phy$edge))) N[phy$edge[i, 1]] <- N[phy$edge[i, 1]] + N[phy$edge[i, 2]]
+  ii <- order(x <- phy$edge[, 1], y <- N[phy$edge[, 2]], decreasing = right)
+  desc <- split(phy$edge[ii, 2], factor(phy$edge[ii, 1], levels = seq_len(max(phy$edge))))
+  tmp <- integer(nb.node)
+  new_anc <- integer(nb.node)
+  new_anc[1] <- tmp[1] <- nb.tip + 1L
+  k <- nb.node
+  pos <- 1L
+  while (pos > 0L && k > 0) {
+    current <- tmp[pos]
+    new_anc[k] <- current
+    k <- k - 1L
+    dc <- desc[[current]]
+    ind <- dc > nb.tip
+    if (any(ind)) {
+      l <- sum(ind)
+      tmp[pos - 1L + seq_len(l)] <- dc[ind]
+      pos <- pos + l - 1L
+    } else {
+      pos <- pos - 1L
+    }
+  }
+  edge <- cbind(rep(new_anc, lengths(desc[new_anc])), unlist(desc[new_anc], use.names = FALSE))
+  phy$edge <- edge
+  if (!is.null(phy$edge.length)) phy$edge.length <- el[edge[, 2L]]
+  attr(phy, "order") <- "postorder"
+  reorder_edges(phy, FALSE)
+}
 lean_reroot <- function(tree, germline, min = 0.001, verbose = 1) {
   ntip <- length(tree$tip.label)
   uca <- ntip + 1
@@ -604,37 +693,37 @@ lean_reroot <- function(tree, germline, min = 0.001, verbose = 1) {
   edge[edge[, 2] == germid, 2] <- uca
   edge <- rbind(edge, c(uca, germid))
   tree$edge.length[length(tree$edge.length) + 1] <- 0
-  swap <- function(tnode, edge, checked) {
-    if (tnode %in% checked) {
-      print("r edge")
-      return(edge)
+  # Every edge pointed away from the new root, breadth first. dowser's recursive swap does the
+  # same edge by edge, overflowing the stack on deep trees and scanning all edges per node.
+  half <- c(edge[, 1], edge[, 2])
+  other <- c(edge[, 2], edge[, 1])
+  adjacent <- split(other, factor(half, levels = seq_len(nnode)))
+  depth <- rep(NA_integer_, nnode)
+  depth[uca] <- 0L
+  queue <- integer(nnode)
+  queue[1] <- uca
+  tail <- 1L
+  for (head in seq_len(nnode)) {
+    if (head > tail) break
+    v <- queue[head]
+    for (w in adjacent[[v]]) {
+      if (!is.na(depth[w])) next
+      depth[w] <- depth[v] + 1L
+      tail <- tail + 1L
+      queue[tail] <- w
     }
-    checked <- c(checked, tnode)
-    children <- edge[edge[, 1] == tnode, 2]
-    parent <- edge[edge[, 2] == tnode, 1]
-    if (length(children) < 2 || sum(!parent %in% checked) > 0) {
-      parent <- edge[edge[, 2] == tnode, 1]
-      parent <- parent[!parent %in% checked]
-      edge[edge[, 1] == parent & edge[, 2] == tnode, ] <- c(tnode, parent)
-      children <- edge[edge[, 1] == tnode, 2]
-    }
-    for (tnode in children) {
-      if (!tnode %in% checked) {
-        edge <- swap(tnode, edge, checked)
-      }
-    }
-    return(edge)
   }
-  edge <- swap(uca, edge, checked = c(1:ntip))
+  flip <- depth[edge[, 1]] > depth[edge[, 2]]
+  edge[flip, ] <- edge[flip, 2:1]
   tree$edge <- edge
   tree$Nnode <- length(unique(edge[, 1]))
-  tree <- ape::reorder.phylo(tree, "postorder")
+  tree <- reorder_edges(tree, TRUE)
   if (!is.null(tree$nodes)) {
     tree$nodes[[nnode]] <- tree$nodes[[uca]]
     tree$nodes[[uca]] <- tree$nodes[[germid]]
   }
   attr(tree, "order") <- NULL
-  tree <- ape::ladderize(tree, right = FALSE)
+  tree <- lean_ladderize(tree, right = FALSE)
   nlength <- sum(tree$edge.length)
   if (abs(nlength - olength) > 0.001) {
     stop(paste("Error in rerooting tree", tree$name, "tree length not consistent"))
@@ -644,12 +733,16 @@ lean_reroot <- function(tree, germline, min = 0.001, verbose = 1) {
 dowser_node_divergences <- dowser:::setNodeDivergences
 lean_node_divergences <- function(tree) {
   ntip <- length(tree$tip.label)
-  # Root depth is distance from the tips' common ancestor only when that ancestor is the root.
-  if (ape::getMRCA(tree, tip = tree$tip.label) != ntip + 1) return(dowser_node_divergences(tree))
+  # Root depth is distance from the tips' common ancestor only when the root has two children.
+  if ((ntip + 1) %in% tree$edge[, 2] || sum(tree$edge[, 1] == ntip + 1) < 2) return(dowser_node_divergences(tree))
   if (is.null(tree$nodes)) {
     tree$nodes <- lapply(seq_len(ntip + tree$Nnode), function(x) list(sequence = NA))
   }
-  divs <- ape::node.depth.edgelength(tree)
+  divs <- numeric(ntip + tree$Nnode)
+  down <- edge_order(tree$edge, ntip, FALSE)
+  e <- tree$edge[down, , drop = FALSE]
+  len <- tree$edge.length[down]
+  for (i in seq_len(nrow(e))) divs[e[i, 2]] <- divs[e[i, 1]] + len[i]
   for (i in seq_along(divs)) tree$nodes[[i]]$divergence <- divs[i]
   tree
 }
@@ -1403,7 +1496,7 @@ process_unit <- function(u) {
 }
 
 # What a worker needs besides dowser: the functions above and what they read.
-POOL_EXPORTS <- c("lean_reroot", "dowser_node_divergences", "lean_node_divergences",
+POOL_EXPORTS <- c("edge_order", "reorder_edges", "lean_ladderize", "lean_reroot", "dowser_node_divergences", "lean_node_divergences",
                   "use_lean_dowser", "attempt_build", "usable_build", "why_build", "build_lineage",
                   "collapse_tree", "tree_rows", "finish_lineage", "process_unit",
                   "route_lineage", "format_lineages", "partition_for", "chain", "HEAVY",
