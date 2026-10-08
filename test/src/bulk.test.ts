@@ -18,6 +18,9 @@ import {
 
 const TIMEOUT = 2_400_000;
 
+// CI runs only the end-to-end test below; FULL_BLOCK_TESTS=1 runs the rest too, locally.
+const fullTest = blockTest.skipIf(process.env.FULL_BLOCK_TESTS !== "1");
+
 type TreeNodeColumns = { hasKnownProperty: boolean; topologyId: string };
 
 function expectTrees({ expect }: TestCtx, outputs: Outputs, label?: string) {
@@ -44,13 +47,13 @@ const AIRR_BULK = [
   { label: "airr-igblast", sample: "airr-igblast", asset: "airr-igblast.tsv" },
 ];
 
-blockTest("no datasets picked", { timeout: 120_000 }, async ({ rawPrj, helpers, expect, ml }) => {
+fullTest("no datasets picked", { timeout: 120_000 }, async ({ rawPrj, helpers, expect, ml }) => {
   const ctx = { rawPrj, helpers, expect, ml };
   const outputs = await runLineageTrees(ctx, { from: [] });
   ctx.expect(value(outputs, "inputOptions")).toEqual([]);
 });
 
-blockTest(
+fullTest(
   "alpaca twice, one a known antibody dataset",
   { timeout: TIMEOUT },
   async ({ rawPrj, helpers, expect, ml }) => {
@@ -70,7 +73,7 @@ blockTest(
 
 // exportAirr finds an uploaded library only as a file beside the clns. Two uploads of one
 // file get two library ids; the third dataset uses MiXCR's built-in library.
-blockTest(
+fullTest(
   "alpaca with uploaded germline libraries",
   { timeout: TIMEOUT },
   async ({ rawPrj, helpers, expect, ml }) => {
@@ -102,7 +105,7 @@ blockTest(
   },
 );
 
-blockTest("imported AIRR", { timeout: TIMEOUT }, async ({ rawPrj, helpers, expect, ml }) => {
+fullTest("imported AIRR", { timeout: TIMEOUT }, async ({ rawPrj, helpers, expect, ml }) => {
   const ctx = { rawPrj, helpers, expect, ml };
   const { blockId: sndBlockId } = await addSamples(ctx, { tsv: AIRR_BULK });
   const imports = [];
@@ -118,7 +121,7 @@ blockTest("imported AIRR", { timeout: TIMEOUT }, async ({ rawPrj, helpers, expec
 });
 
 // A bare antibody set keys on pl7.app/variantKey, not a clonotype key, so it is not offered.
-blockTest(
+fullTest(
   "imported bare heavy set is not offered",
   { timeout: TIMEOUT },
   async ({ rawPrj, helpers, expect, ml }) => {
@@ -143,7 +146,7 @@ blockTest(
   },
 );
 
-blockTest(
+fullTest(
   "alpaca MiXCR plus imported AIRR",
   { timeout: TIMEOUT },
   async ({ rawPrj, helpers, expect, ml }) => {
@@ -172,7 +175,7 @@ blockTest(
   },
 );
 
-blockTest("near-empty IG input", { timeout: TIMEOUT }, async ({ rawPrj, helpers, expect, ml }) => {
+fullTest("near-empty IG input", { timeout: TIMEOUT }, async ({ rawPrj, helpers, expect, ml }) => {
   const ctx = { rawPrj, helpers, expect, ml };
   const { blockId: sndBlockId } = await addSamples(ctx, {
     fastq: [{ label: "Human bulk", samples: [HUMAN_TCR_BULK] }],
@@ -190,7 +193,7 @@ blockTest("near-empty IG input", { timeout: TIMEOUT }, async ({ rawPrj, helpers,
     .toMatchObject([{ clonotype_count: 1, lineage_count: 1 }]);
 });
 
-blockTest(
+fullTest(
   "donor column from sample metadata",
   { timeout: TIMEOUT },
   async ({ rawPrj, helpers, expect, ml }) => {
@@ -227,7 +230,7 @@ function soiList(name: string, searchParameters: SOIList["parameters"]["searchPa
 }
 
 // One clonotyping, then one Lineage Trees block per setting.
-blockTest(
+fullTest(
   "alpaca, one clonotyping under several settings",
   { timeout: 2 * TIMEOUT },
   async ({ rawPrj, helpers, expect, ml }) => {
@@ -274,3 +277,51 @@ blockTest(
     ctx.expect(hits?.[tree.parameters.id]?.lineages, label).toBeGreaterThan(0);
   },
 );
+
+// One project through the whole block: an uploaded germline library, a known antibody dataset,
+// a donor column and a sequence search. The logic itself is tested by the R and HILARy suites.
+blockTest("end to end", { timeout: 900_000 }, async ({ rawPrj, helpers, expect, ml }) => {
+  const ctx = { rawPrj, helpers, expect, ml };
+  const { blockId: sndBlockId } = await addSamples(ctx, {
+    fastq: [{ label: "Alpaca", samples: [ALPACA] }],
+    metadata: { label: "Donor", values: { [ALPACA.label]: "Ty1" } },
+  });
+  const uploaded = await clonotype(ctx, {
+    sndBlockId,
+    datasetLabel: "Alpaca",
+    preset: ALPACA_PRESET,
+    species: "alpaca",
+    libraryAsset: "alpaca-library.json.gz",
+    chains: ["IGHeavy"],
+    label: "Uploaded",
+  });
+  const builtIn = await clonotype(ctx, {
+    sndBlockId,
+    datasetLabel: "Alpaca",
+    preset: ALPACA_PRESET,
+    species: "alpaca",
+    chains: ["IGHeavy"],
+    label: "Built-in",
+  });
+  const search = soiList("search", {
+    type: "preset_alignment_search_top",
+    dissimilarityPercent: 2,
+  });
+  const outputs = await runLineageTrees(ctx, {
+    from: [uploaded, builtIn],
+    known: [builtIn],
+    donor: { blockId: sndBlockId, label: "Donor" },
+    data: { sequencesOfInterest: [search] },
+  });
+  expectTrees(ctx, outputs);
+  expectClustered(ctx, outputs);
+  ctx.expect(value<TreeNodeColumns>(outputs, "treeNodeColumns")?.hasKnownProperty).toBe(true);
+  ctx
+    .expect(value<string>(outputs, "modeStatement"))
+    .toContain("1 dataset as known antibody datasets");
+  const stats = value<DonorStats[]>(outputs, "donorStats") ?? [];
+  ctx.expect(stats.map((s) => s.donor).join(",")).toContain("Ty1");
+  ctx.expect(value<boolean>(outputs, "soiReady")).toBe(true);
+  const hits = value<Record<string, { nodes: number; lineages: number }>>(outputs, "soiHits");
+  ctx.expect(hits?.[search.parameters.id]?.lineages).toBeGreaterThan(0);
+});

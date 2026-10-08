@@ -35,7 +35,7 @@
     },
     "test": {
       "dependsOn": ["build", "check"],
-      "passThroughEnv": ["PL_ADDRESS", "PL_TEST_PASSWORD", "PL_TEST_USER", "PL_TEST_PROXY", "DEBUG"]
+      "passThroughEnv": ["PL_ADDRESS", "PL_TEST_PASSWORD", "PL_TEST_USER", "PL_TEST_PROXY", "DEBUG", "FULL_BLOCK_TESTS"]
     },
     "@platforma-open/milaboratories.lineage-trees.immcantation#test": {
       "inputs": ["test/**", "context/**", "Dockerfile"],
