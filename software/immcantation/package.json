@@ -1,6 +1,6 @@
 {
   "name": "@platforma-open/milaboratories.lineage-trees.immcantation",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Immcantation suite 4.8.0 with Dowser 2.5.1: germline reconstruction, novel allele inference, tree building",
   "files": [
     "./dist/**/*"
