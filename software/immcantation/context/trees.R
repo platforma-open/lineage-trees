@@ -1397,10 +1397,15 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
     }
   }
 
+  # Ids in the order a walk of the ladderized tree meets the nodes, smaller clades first: the
+  # dendrogram lays siblings out in id order.
+  walk <- lean_ladderize(p, right = FALSE)$edge
+  walk_id <- seq_along(labels)
+  if (nrow(walk)) walk_id[c(walk[1, 1], walk[, 2])] <- seq_len(nrow(walk) + 1L)
   nodes <- data.frame(
     lineage_id = lid,
-    node_id = seq_along(labels),
-    parent_id = parent,
+    node_id = walk_id,
+    parent_id = walk_id[parent],
     distance = dist,
     is_observed = ifelse(is.na(labels) | labels == "Germline", "false", "true"),
     label = ifelse(is.na(labels), "", labels),
@@ -1421,7 +1426,7 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
     nodes[[paste0(chain, "_aa_mutations_from_parent")]] <- if (is.null(s)) blank_text else s$aa_text
     nodes[[paste0(chain, "_aa_mutation_count_from_parent")]] <- if (is.null(s)) blank_count else s$aa_count
   }
-  list(nodes = nodes[, NODE_COLUMNS], known = known)
+  list(nodes = nodes[order(nodes$node_id), NODE_COLUMNS], known = known)
 }
 
 # A build step to its result: collapsed tree rows and builder.
