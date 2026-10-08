@@ -25,6 +25,7 @@ catalog:
   typescript: ~5.9.3
   "@platforma-open/milaboratories.runenv-python-3": 1.13.0
   # The R run environment for the immcantation binary, beside its docker image.
+  "@platforma-open/milaboratories.runenv-r-lineage-trees": 0.1.2
   "@platforma-open/milaboratories.software-mixcr": 4.7.0-395-develop
   "@milaboratories/graph-maker": ^1.10.0
   vue: 3.5.24
