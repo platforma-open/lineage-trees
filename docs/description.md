@@ -1,6 +1,6 @@
 # Overview
 
-Groups B cell clonotypes into clonal lineages and builds a tree for each lineage, showing how it developed during an immune response and where each clonotype sits in that history. Members of a lineage descend from the same B cell and differ by the mutations they picked up along the way. The block works on antibody (IG) data, bulk heavy chain or paired single cell, from MiXCR Clonotyping or Import V(D)J Data, and can mix both in one run. Lineages never cross donors: a sample metadata column can name each sample's donor, otherwise all samples are treated as one donor.
+Groups B cell clonotypes into clonal lineages and builds a tree for each lineage, showing how it developed during an immune response and where each clonotype sits in that history. Members of a lineage descend from the same B cell and differ by the mutations they picked up along the way. The block works on antibody (IG) data, bulk heavy chain or paired single cell, from MiXCR Clonotyping or Import V(D)J Data, and can mix both in one run. Lineages are grouped per donor; a sample metadata column names each sample's donor.
 
 Clonotypes are grouped into lineages by their heavy chain with HILARy, using a fixed similarity threshold or its adaptive mode, and split by light chain where light chains are present. TIgGER first infers the donor's V gene alleles. Each lineage then gets a tree with its ancestral sequences reconstructed, built with FastTree and RAxML-NG through Dowser, or optionally with IgPhyML.
 
