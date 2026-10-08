@@ -31,7 +31,7 @@ Clonotypes descended from one naive B cell form a clonal lineage whose members d
 | Tools | [HILARy](https://github.com/statbiophys/HILARy), [TIgGER](https://tigger.readthedocs.io/), [Dowser](https://dowser.readthedocs.io/), [FastTree](https://morgannprice.github.io/fasttree/), [raxml-ng](https://github.com/amkozlov/raxml-ng), optionally [IgPhyML](https://github.com/immcantation/igphyml) |
 | Alignments | MiXCR's own where a dataset carries a `clns`, otherwise the dataset's `sequence_alignment` and `germline_alignment`. Nothing is realigned |
 | Ranking columns | Heavy AA mutations to known antibody, Light AA mutations to known antibody on paired data (lower is better) |
-| Views | Donor overview with per-stage progress and logs, lineage table, lineage expansion plot, dendrogram and node table per lineage, mutational path, baskets, sequence search |
+| Views | Donor overview with per-stage progress and logs, lineage table, dendrogram and node table per lineage, mutational path, baskets, sequence search |
 
 ## Settings
 
