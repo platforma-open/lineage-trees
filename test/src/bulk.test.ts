@@ -221,7 +221,8 @@ function soiList(name: string, searchParameters: SOIList["parameters"]["searchPa
       targetFeature: "CDR3" as const,
       searchParameters,
     },
-    sequences: [{ id: uniquePlId(), name: "shared", sequence: SHARED_CDR3 }],
+    // A tab and a line break in the name must not split the search's tab-separated input.
+    sequences: [{ id: uniquePlId(), name: "shared\tCDR3\nfrom FASTA", sequence: SHARED_CDR3 }],
   };
 }
 

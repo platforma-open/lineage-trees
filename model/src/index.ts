@@ -550,7 +550,10 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       .filter((list) => list.sequences.length > 0)
       .map((list) => ({
         parameters: list.parameters,
-        sequences: [...list.sequences].sort((a, b) => a.id.localeCompare(b.id)),
+        // The workflow writes names into a tab-separated file; a tab or line break would split it.
+        sequences: [...list.sequences]
+          .map((seq) => ({ ...seq, name: seq.name.replace(/[\t\r\n]+/g, " ") }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
       }))
       .sort((a, b) => a.parameters.id.localeCompare(b.parameters.id));
     return {
