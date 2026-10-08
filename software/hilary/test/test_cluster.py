@@ -290,6 +290,22 @@ def main(tmp: Path) -> None:
     ok("nearest known antibody shows the known antibody's Clone Id, else its id; links keep the id",
        nearest == {"a": "42", "b": "y"} and linked == ["x", "y"])
 
+    # A clonotype in a second donor's smaller lineage, scored to another known antibody there:
+    # one row per clonotype, the larger lineage's.
+    write(anc / "lineages" / "donor-1.tsv", [
+        {"sequence_id": "0_a", "lineage_id": "L2", "link": 1, "group_id": "0_a"}])
+    write(anc / "known-distances" / "donor-1.tsv", [
+        {"sequence_id": "0_a", "known_id": "1_y", "known_aa_heavy": 9, **blank}])
+    stage("collect", "--lineages-dir", anc / "lineages", "--nodes-dir", anc / "nodes",
+          "--node-links-dir", anc / "node-links", "--known-distances-dir", anc / "known-distances",
+          "--clonotypes", anc / "clonotypes.tsv", "--donor", "A", "--donor", "B",
+          "--dataset", "0", "--dataset", "1", "--known", "1", "--per-dataset-dir", anc / "out",
+          "--out-nodes", anc / "nodes.tsv", "--out-lineage-stats", anc / "stats.tsv")
+    two = read(anc / "out" / "known-distances-0.tsv")
+    ok("a clonotype scored in two donors keeps one score, its larger lineage's",
+       sorted(two["sequence_id"]) == ["a", "b"]
+       and two.set_index("sequence_id").loc["a", ["known_id", "known_aa_heavy"]].tolist() == ["42", "2"])
+
     # The full method compares rows base by base, so padding must not read as a difference:
     # a member with shorter 5' and 3' coverage pads with its gene's germline, not N.
     v_side, j_side = "ACGTACGTACGTAAAACCCCGGGG", "TTTGGGCCC"

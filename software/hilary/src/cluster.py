@@ -532,15 +532,13 @@ NODE_PROPERTY_COLUMNS = ["lineage_id", "node_id", *NODE_PROPERTY_SOURCE_COLUMNS]
 
 
 
-def _write_one_per_clonotype(frame: pd.DataFrame, sizes: pd.Series, path: Path,
-                             columns: list[str]) -> None:
-    """Write one row per clonotype, no sample axis, so lead selection can rank by it.
+def _one_per_clonotype(frame: pd.DataFrame, sizes: pd.Series) -> pd.DataFrame:
+    """One row per clonotype, so lead selection can rank by it.
 
     A clonotype in two donors' lineages keeps the one from the larger lineage.
     """
     if frame.empty:
-        pd.DataFrame(columns=columns).to_csv(path, sep="\t", index=False)
-        return
+        return frame
     ranked = frame.assign(_support=frame["lineage_id"].map(sizes).fillna(0).astype(int))
     ranked = ranked.sort_values(["sequence_id", "_support", "lineage_id"],
                                 ascending=[True, False, True])
@@ -548,7 +546,13 @@ def _write_one_per_clonotype(frame: pd.DataFrame, sizes: pd.Series, path: Path,
     if len(deduped) < len(ranked):
         print(f"{len(ranked) - len(deduped)} clonotypes were scored in more than one "
               f"donor's lineage; kept the better-supported one")
-    deduped[columns].to_csv(path, sep="\t", index=False)
+    return deduped.drop(columns="_support")
+
+
+def _write_one_per_clonotype(frame: pd.DataFrame, sizes: pd.Series, path: Path,
+                             columns: list[str]) -> None:
+    """Write one row per clonotype, no sample axis."""
+    _one_per_clonotype(frame, sizes).reindex(columns=columns).to_csv(path, sep="\t", index=False)
 
 
 def _gene(call: str) -> str:
@@ -713,7 +717,7 @@ def _write_per_dataset(
         _write_one_per_clonotype(slice_of(germline_mutations, index, "sequence_id"), sizes,
                                  out / f"germline-mutations-{index}.tsv",
                                  GERMLINE_MUTATION_OUT_COLUMNS)
-        distances = slice_of(known_distances, index, "sequence_id")
+        distances = _one_per_clonotype(slice_of(known_distances, index, "sequence_id"), sizes)
         # Candidate-to-known antibody links, one file per known antibody dataset, written even if empty.
         for known_index in args.known:
             pair = (
@@ -872,8 +876,11 @@ def collect(args: argparse.Namespace) -> None:
             germline_parts.append(_read_donor_file(args.germline_mutations_dir, index,
                                                    GERMLINE_MUTATION_COLUMNS))
         if args.known_distances_dir is not None:
-            distance_parts.append(
-                _read_donor_file(args.known_distances_dir, index, KNOWN_DISTANCE_COLUMNS))
+            # With the donor's lineage, so a clonotype scored in two donors keeps one score.
+            distances = _read_donor_file(args.known_distances_dir, index, KNOWN_DISTANCE_COLUMNS)
+            distance_parts.append(distances.merge(
+                lineages[["sequence_id", "lineage_id"]].drop_duplicates("sequence_id"),
+                on="sequence_id", how="left"))
 
     lineages = _concat(lineage_parts, LINEAGE_FILE_COLUMNS)
     # Empty donors leave no lineage rows, and the concat then drops the donor column too.
@@ -975,7 +982,7 @@ def collect(args: argparse.Namespace) -> None:
         clonotypes.drop_duplicates("sequence_id").set_index("sequence_id")["clone_label"]
         if "clone_label" in clonotypes.columns else pd.Series(dtype=str))
     _write_per_dataset(args, lineages, links,
-                       _concat(distance_parts, KNOWN_DISTANCE_COLUMNS),
+                       _concat(distance_parts, [*KNOWN_DISTANCE_COLUMNS, "lineage_id"]),
                        _concat(germline_parts, GERMLINE_MUTATION_COLUMNS), known_labels)
 
     # Per-donor counts for the overview; names match the workflow's groups.
