@@ -1326,6 +1326,19 @@ container_used <- function() {
   NA_real_
 }
 
+# A finished tree's rows go to disk as it arrives; held in memory, every tree of a large donor
+# stayed in this process until saving.
+PART_DIR <- file.path(dirname(nodes_path), "tree-parts")
+spill <- function(r) {
+  if (is.null(r$nodes)) return(r)
+  dir.create(PART_DIR, showWarnings = FALSE)
+  r$part_file <- file.path(PART_DIR, sprintf("%d.rds", r$slot))
+  saveRDS(list(nodes = r$nodes, known = r$known), r$part_file, compress = FALSE)
+  r$nodes <- NULL
+  r$known <- NULL
+  r
+}
+
 # Largest lineage first, so a big one is not the run's tail; clusterApplyLB's loop, inlined.
 run_pool <- function(cl, units) {
   n <- length(units)
@@ -1385,7 +1398,7 @@ run_pool <- function(cl, units) {
     }
     if (length(value$log)) cat(value$log, sep = "\n")
     value$log <- NULL
-    results[[r$tag]] <- value
+    results[[r$tag]] <- spill(value)
     trees_done <<- trees_done + units[[r$tag]]$size
     now <- Sys.time()
     if (as.numeric(difftime(now, last_tree_progress, units = "secs")) >= TREE_PROGRESS_EVERY || got == n) {
@@ -1442,8 +1455,8 @@ queue_igphyml <- function(subset, part, label) {
   }
   if (usable_build(result)) {
     done <- lapply(seq_len(nrow(result)), function(i) {
-      finish_lineage(list(tree = result[i, ], builder = "igphyml"),
-                     unit_for(result[i, ], "igphyml", part, label))
+      spill(finish_lineage(list(tree = result[i, ], builder = "igphyml"),
+                           unit_for(result[i, ], "igphyml", part, label)))
     })
     trees_done <<- trees_done + sum(lengths(tip_rows[as.character(subset$clone_id)]))
     progress(sprintf("Trees: %.1f%%", 100 * trees_done / max(1, trees_total)))
@@ -1505,7 +1518,7 @@ if (length(units)) {
 
 # Why each lineage that came back without a tree has none.
 for (r in finished) {
-  if (!is.null(r$nodes) || is.null(r$lid)) next
+  if (!is.null(r$part_file) || is.null(r$lid)) next
   mark_no_tree(r$lid, if (isTRUE(r$below_min)) below_min_reason
                else if (identical(r$formatted, FALSE)) "Dropped while preparing its sequences for tree building, for example because every one has a stop codon."
                else if (!is.null(r$note)) as_sentence(sub("^produced no tree \\((.*)\\)$", "tree building failed: \\1", r$note))
@@ -1556,7 +1569,7 @@ for (label in intersect(GROUP_ORDER, vapply(finished, function(r) r$label, chara
   notes <- unlist(lapply(own, function(r) r$note))
   for (note in unique(notes)) cat(sprintf("%s: %d lineages %s\n", label, sum(notes == note), note))
 }
-built_ok <- Filter(function(r) !is.null(r$nodes), finished)
+built_ok <- Filter(function(r) !is.null(r$part_file), finished)
 rm(finished)
 if (!length(built_ok)) finish_empty("no lineage produced a tree", membership)
 cat(sprintf("collapsed %d of %d internal nodes with identical reconstructed sequences\n",
@@ -1565,10 +1578,22 @@ cat(sprintf("collapsed %d of %d internal nodes with identical reconstructed sequ
 trees <- data.frame(clone_id = vapply(built_ok, function(r) r$clone_id, character(1)),
                     tree_builder = vapply(built_ok, function(r) r$builder, character(1)),
                     stringsAsFactors = FALSE)
-known_rows <- Filter(Negate(is.null), lapply(built_ok, function(r) r$known))
-nodes <- as.data.frame(dplyr::bind_rows(lapply(built_ok, function(r) r$nodes)))
-rm(built_ok)
-write.table(nodes, nodes_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
+# Read back one tree at a time and appended in build order, keeping only the tips and distances.
+known_rows <- list()
+tips <- vector("list", length(built_ok))
+node_count <- 0L
+for (i in seq_along(built_ok)) {
+  part <- readRDS(built_ok[[i]]$part_file)
+  write.table(part$nodes, nodes_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "",
+              append = i > 1, col.names = i == 1)
+  node_count <- node_count + nrow(part$nodes)
+  observed <- part$nodes$is_observed == "true" & part$nodes$label != "Germline"
+  tips[[i]] <- part$nodes[observed, c("lineage_id", "node_id", "label")]
+  if (!is.null(part$known)) known_rows[[length(known_rows) + 1L]] <- part$known
+}
+unlink(PART_DIR, recursive = TRUE)
+tips <- do.call(rbind, tips)
+rm(built_ok, part)
 
 if (!is.null(known_path)) {
   distances <- if (length(known_rows)) do.call(rbind, known_rows) else
@@ -1585,8 +1610,6 @@ write_builders(membership$lineage_id,
 
 progress("Linking tips to clonotypes")
 # Link each tip to every clonotype in its group; the representative is marked.
-tips <- nodes[nodes$is_observed == "true" & nodes$label != "Germline",
-              c("lineage_id", "node_id", "label")]
 tip_group <- group_members$group_id[match(tips$label, group_members$sequence_id)]
 links <- merge(
   data.frame(lineage_id = tips$lineage_id, node_id = tips$node_id, group_id = tip_group,
@@ -1598,6 +1621,6 @@ links <- links[order(links$lineage_id, links$node_id, links$sequence_id), , drop
 links$link <- 1L
 write.table(links, links_path, sep = "\t", quote = FALSE, row.names = FALSE, na = "")
 cat(sprintf("built %d trees, %d nodes, %d lineages skipped, tree building took %s\n",
-            nrow(trees), nrow(nodes), length(skipped), clock(trees_started)))
+            nrow(trees), node_count, length(skipped), clock(trees_started)))
 progress("Trees: 100.0%")
 close_log()
