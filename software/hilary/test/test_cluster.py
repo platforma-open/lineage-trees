@@ -203,6 +203,17 @@ def main(tmp: Path) -> None:
     ok("node metadata with nothing placed still carries the count columns",
        list(got.columns) == ["lineage_id", "node_id", "timepoint", "timepoint__count"])
 
+    # Two datasets on one sample axis: a shared sample's counts add up under the first.
+    shared = pd.DataFrame({"sample_id": ["0_s1", "1_s1", "1_s2"], "sequence_id": ["0_c1", "1_c1", "1_c2"],
+                           "lineage_id": ["L1", "L1", "L2"], "abundance": [1.0, 3.0, 2.0]})
+    pooled = cluster._expansion(cluster._pooled_samples(shared, [["1", "0"]])).set_index("sample_id")
+    ok("datasets on one sample axis pool a shared sample's expansion under the first",
+       set(pooled.index) == {"0_s1", "0_s2"} and pooled.loc["0_s1", "abundance_percent"] == 100.0
+       and pooled.loc["0_s1", "size_rank"] == 1)
+    alone = cluster._expansion(cluster._pooled_samples(shared, []))
+    ok("and without a group each dataset keeps its own samples",
+       set(alone["sample_id"]) == {"0_s1", "1_s1", "1_s2"})
+
     # Adaptive mode on a donor with no V, J and CDR3-length group of two: HILARy raises a
     # KeyError there, so each clonotype becomes its own lineage and the method says so.
     lone = write(tmp / "lone.tsv", [

@@ -76,6 +76,9 @@ self.body(func(inputs) {
 		if ds.isKnown {
 			collectCmd.arg("--known").arg(ds.index)
 		}
+		if ds.expansionFirst != ds.index {
+			collectCmd.arg("--expansion-group").arg(ds.index).arg(ds.expansionFirst)
+		}
 	}
 	maps.forEach(inputs.sampleMetadata, func(index, file) {
 		collectCmd.addFile("sample-metadata-" + index + ".tsv", file).

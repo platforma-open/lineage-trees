@@ -450,6 +450,16 @@ def cluster(args: argparse.Namespace) -> None:
     clones.to_csv(args.out_clones, sep="\t", index=False)
 
 
+def _pooled_samples(present: pd.DataFrame, groups: list[list[str]]) -> pd.DataFrame:
+    """Datasets on one sample axis share their samples: each takes its group's first dataset's prefix."""
+    leader = dict(groups)
+    if not leader or present.empty:
+        return present
+    index = dataset_of(present["sample_id"])
+    return present.assign(
+        sample_id=index.map(lambda i: leader.get(i, i)) + DATASET_SEP + unprefixed(present["sample_id"]))
+
+
 def _expansion(present: pd.DataFrame) -> pd.DataFrame:
     """Per-sample lineage size rank and each lineage's share of the sample's abundance."""
     sized = (
@@ -964,7 +974,7 @@ def collect(args: argparse.Namespace) -> None:
             present = abundance.merge(lineages, on="sequence_id", how="inner")
         dataset_total = float(pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0).sum())
         present = present.assign(abundance=pd.to_numeric(present["abundance"], errors="coerce").fillna(0))
-        expansion = _expansion(present)
+        expansion = _expansion(_pooled_samples(present, args.expansion_group))
     else:
         expansion = pd.DataFrame(
             columns=["sample_id", "lineage_id", "size_rank", "abundance_percent"]
@@ -1140,6 +1150,8 @@ def main() -> None:
     k.add_argument("--sample-metadata", action="append", nargs=2, default=[], metavar=("INDEX", "PATH"),
                    help="a dataset's sample_id plus meta_<k> columns; repeat once per dataset")
     k.add_argument("--out-node-metadata", type=Path)
+    k.add_argument("--expansion-group", action="append", nargs=2, default=[], metavar=("INDEX", "FIRST"),
+                   help="a dataset whose expansion pools into another's, both on one sample axis")
     k.add_argument(
         "--known",
         action="append",

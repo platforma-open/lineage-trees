@@ -260,7 +260,7 @@ self.body(func(inputs) {
 		if ds.hasSampleMetadata {
 			sampleMetadata[ds.index] = inputs.sampleMetadata[ds.index]
 		}
-		collectDatasets = append(collectDatasets, { index: ds.index, isKnown: ds.isKnown })
+		collectDatasets = append(collectDatasets, { index: ds.index, isKnown: ds.isKnown, expansionFirst: ds.expansionFirst })
 	}
 	collected := outputsOf("collect", render.create(collectTpl, {
 		abundance: inputs.abundanceTable,
