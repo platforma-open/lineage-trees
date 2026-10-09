@@ -510,9 +510,15 @@ LINEAGE_FILE_COLUMNS = [*LINEAGE_COLUMNS, "group_id"]
 STEP_COLUMNS = [f"{chain}_{what}" for chain in ("heavy", "light") for what in (
     "mutations_from_parent", "mutation_count_from_parent", "unresolved_from_parent",
     "aa_mutations_from_parent", "aa_mutation_count_from_parent")]
+# Changes since the germline and the MRCA, per chain and alphabet, and heavy V and J identity.
+HISTORY_COLUMNS = ["distance_from_germline", *[f"{chain}_{what}" for chain in ("heavy", "light") for what in (
+    "mutations_from_germline", "mutation_count_from_germline", "mutation_rate_from_germline",
+    "aa_mutations_from_germline", "aa_mutation_count_from_germline", "aa_mutation_rate_from_germline",
+    "mutations_from_mrca", "mutation_count_from_mrca",
+    "aa_mutations_from_mrca", "aa_mutation_count_from_mrca")], "heavy_v_identity", "heavy_j_identity"]
 NODE_COLUMNS = ["lineage_id", "node_id", "parent_id", "distance", "is_observed", "label",
                 "heavy_sequence", "light_sequence", "node_depth",
-                "terminal_branch_fraction", "parent_descendant_count", *STEP_COLUMNS]
+                "terminal_branch_fraction", "parent_descendant_count", *STEP_COLUMNS, *HISTORY_COLUMNS]
 # The node linker, as exported.
 NODE_LINK_COLUMNS = ["lineage_id", "node_id", "sequence_id", "link"]
 # As the tree step writes it; is_representative is read here, not exported.

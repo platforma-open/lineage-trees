@@ -235,6 +235,113 @@ check_node_steps <- function(nodes, label, light = FALSE) {
   ok_all(what, parts)
 }
 
+# Changes since the germline tip and since the MRCA of the observed tips, rates, V and J identity
+# and distance from the germline, recomputed here from the node sequences and parent links.
+HISTORY_CHAINS <- c("heavy", "light")
+check_node_history <- function(nodes, label, light = FALSE, run = NULL) {
+  what <- paste(label, "check_node_history")
+  wanted <- c("distance_from_germline", "heavy_v_identity", "heavy_j_identity",
+              unlist(lapply(HISTORY_CHAINS, function(chain) paste0(chain, c(
+                "_mutations_from_germline", "_mutation_count_from_germline", "_mutation_rate_from_germline",
+                "_aa_mutations_from_germline", "_aa_mutation_count_from_germline", "_aa_mutation_rate_from_germline",
+                "_mutations_from_mrca", "_mutation_count_from_mrca",
+                "_aa_mutations_from_mrca", "_aa_mutation_count_from_mrca")))))
+  missing <- setdiff(wanted, names(nodes))
+  if (length(missing)) return(ok_all(what, setNames(list(FALSE), paste("columns", paste(missing, collapse = ", ")))))
+  if (!nrow(nodes)) return(ok_all(what, list()))
+  num <- function(x) suppressWarnings(as.numeric(x))
+  near <- function(a, b) length(a) == length(b) && all((is.na(a) & is.na(b)) | (!is.na(a) & !is.na(b) & abs(a - b) < 1e-6))
+  count_listed <- function(x) ifelse(is.na(x) | x == "", 0L, lengths(strsplit(x, ",")))
+  settled_diff <- function(a, b) {
+    a <- strsplit(toupper(a), "")[[1]]; b <- strsplit(toupper(b), "")[[1]]
+    if (length(a) != length(b)) return(c(NA, NA))
+    both <- a %in% c("A", "C", "G", "T") & b %in% c("A", "C", "G", "T")
+    c(sum(both & a != b), sum(both))
+  }
+  parts <- list()
+  bad <- function(name) parts[[name]] <<- FALSE
+  if (!is.null(run)) {
+    a <- run$aligned[run$aligned$locus == "IGH", ]
+    a$lineage_id <- run$lineages$lineage_id[match(a$sequence_id, run$lineages$sequence_id)]
+  }
+  for (lid in unique(nodes$lineage_id)) {
+    d <- nodes[nodes$lineage_id == lid, ]
+    id <- as.integer(d$node_id)
+    up <- suppressWarnings(as.integer(d$parent_id))
+    row_of <- function(node) match(node, id)
+    germ <- which(d$label == "Germline")
+    if (length(germ) != 1) { bad("one germline tip per lineage"); next }
+    # Root distance per node, parents first by depth.
+    order_ <- order(as.integer(d$node_depth))
+    root_d <- numeric(nrow(d))
+    for (k in order_) if (!is.na(up[k])) root_d[k] <- root_d[row_of(up[k])] + num(d$distance[k])
+    ancestors <- function(k) { out <- integer(0); while (!is.na(k)) { out <- c(out, k); k <- if (is.na(up[k])) NA else row_of(up[k]) }; out }
+    g_line <- ancestors(germ)
+    to_germ <- vapply(seq_len(nrow(d)), function(k) {
+      lca <- ancestors(k)[ancestors(k) %in% g_line][1]
+      root_d[k] + root_d[germ] - 2 * root_d[lca]
+    }, numeric(1))
+    if (!near(num(d$distance_from_germline), to_germ)) bad("distance from germline is the path through the common ancestor")
+    if (!isTRUE(num(d$distance_from_germline[germ]) == 0)) bad("germline at distance zero from itself")
+    # MRCA: the deepest node every observed tip descends from.
+    obs <- which(d$is_observed == "true" & d$label != "Germline")
+    lines <- lapply(obs, ancestors)
+    common <- Reduce(intersect, lines)
+    mrca <- common[which.max(as.integer(d$node_depth[common]))]
+    under <- vapply(seq_len(nrow(d)), function(k) mrca %in% ancestors(k), logical(1))
+    for (chain in HISTORY_CHAINS) {
+      col <- function(x) d[[paste0(chain, x)]]
+      seqs <- d[[paste0(chain, "_sequence")]]
+      g_n <- num(col("_mutation_count_from_germline"))
+      m_n <- num(col("_mutation_count_from_mrca"))
+      if (chain == "light" && !light) {
+        if (!all(is.na(g_n)) || !all(is.na(m_n))) bad("no light history without light chains")
+        next
+      }
+      carried <- !is.na(seqs) & grepl("[ACGT]", toupper(seqs))
+      want_g <- t(vapply(seq_len(nrow(d)), function(k) settled_diff(seqs[germ], seqs[k]), numeric(2)))
+      want_m <- t(vapply(seq_len(nrow(d)), function(k) settled_diff(seqs[mrca], seqs[k]), numeric(2)))
+      scored <- if (chain == "light") carried else rep(TRUE, nrow(d))
+      at <- function(name) paste(chain, name)
+      if (!near(g_n[scored], want_g[scored, 1])) parts[[at("germline count recomputed from the sequences")]] <- FALSE
+      if (chain == "light" && any(!is.na(g_n[!carried]))) parts[[at("blank where the node has no light chain")]] <- FALSE
+      rate <- num(col("_mutation_rate_from_germline"))
+      want_rate <- ifelse(want_g[, 2] > 0, want_g[, 1] / want_g[, 2], NA)
+      if (!near(rate[scored], want_rate[scored])) parts[[at("germline rate is count over settled positions")]] <- FALSE
+      if (!all(g_n[scored] == count_listed(col("_mutations_from_germline")[scored]), na.rm = TRUE)) parts[[at("germline count matches its list")]] <- FALSE
+      if (scored[germ] && !isTRUE(g_n[germ] == 0)) parts[[at("germline has no mutations from itself")]] <- FALSE
+      if (!near(m_n[under & scored], want_m[under & scored, 1])) parts[[at("MRCA count recomputed from the sequences")]] <- FALSE
+      if (any(!is.na(m_n[!under]))) parts[[at("MRCA figures blank above the MRCA")]] <- FALSE
+      if (!all(m_n[under & scored] == count_listed(col("_mutations_from_mrca")[under & scored]), na.rm = TRUE)) parts[[at("MRCA count matches its list")]] <- FALSE
+      ga <- num(col("_aa_mutation_count_from_germline"))
+      ma <- num(col("_aa_mutation_count_from_mrca"))
+      if (any(ga > g_n, na.rm = TRUE) || any(ma > m_n, na.rm = TRUE)) parts[[at("residues never exceed bases")]] <- FALSE
+      if (any(scored) && all(is.na(ga[scored]))) parts[[at("amino acid figures present")]] <- FALSE
+      aa_rate <- num(col("_aa_mutation_rate_from_germline"))
+      if (any(aa_rate < 0 | aa_rate > 1, na.rm = TRUE)) parts[[at("amino acid rate in [0, 1]")]] <- FALSE
+    }
+    # Identity to the V and J germline, over the padded flanks either side of the junction.
+    v_id <- num(d$heavy_v_identity); j_id <- num(d$heavy_j_identity)
+    if (!isTRUE(v_id[germ] == 100 && j_id[germ] == 100)) bad("germline is 100% identical to itself")
+    if (any(v_id < 0 | v_id > 100 | j_id < 0 | j_id > 100, na.rm = TRUE) || all(is.na(v_id))) bad("identity in [0, 100]")
+    if (!is.null(run)) {
+      rows <- a$lineage_id == lid
+      vw <- max(as.integer(a$frame_left[rows])); jw <- max(as.integer(a$frame_right[rows]))
+      heavy <- toupper(d$heavy_sequence)
+      ident <- function(k, cols) {
+        x <- strsplit(heavy[k], "")[[1]][cols]; g <- strsplit(heavy[germ], "")[[1]][cols]
+        both <- x %in% c("A", "C", "G", "T") & g %in% c("A", "C", "G", "T")
+        if (!any(both)) NA else 100 * mean(x[both] == g[both])
+      }
+      w <- nchar(heavy[germ])
+      want_v <- vapply(seq_len(nrow(d)), ident, numeric(1), cols = seq_len(vw))
+      want_j <- vapply(seq_len(nrow(d)), ident, numeric(1), cols = seq.int(w - jw + 1L, w))
+      if (!near(v_id, want_v) || !near(j_id, want_j)) bad("identity recomputed over the V and J flanks")
+    }
+  }
+  ok_all(what, parts)
+}
+
 # Every lineage is one rooted tree over contiguous node ids.
 check_topology <- function(nodes, label) {
   contiguous <- TRUE; one_root <- TRUE; parents_known <- TRUE
@@ -348,6 +455,7 @@ if (p$ok) {
   check_topology(p$nodes, "paired")
   check_node_sequences(p$nodes, "paired", light = TRUE, run = p)
   check_node_steps(p$nodes, "paired", light = TRUE)
+  check_node_history(p$nodes, "paired", light = TRUE, run = p)
   ok_all("paired: node links are valid and every observed node is linked", list(
     "links match lineages" = all(paste(p$links$sequence_id, p$links$lineage_id) %in%
                                    paste(p$lineages$sequence_id, p$lineages$lineage_id)),
@@ -428,6 +536,7 @@ if (tb$ok) {
   check_topology(tb$nodes, "table")
   check_node_sequences(tb$nodes, "table", run = tb)
   check_node_steps(tb$nodes, "table")
+  check_node_history(tb$nodes, "table", run = tb)
 
   g <- suppressWarnings(as.integer(tb$germline$germline_mutation_count))
   ok("table: germline mutations, one non-negative count per aligned clonotype, some mutated",
@@ -465,6 +574,7 @@ if (isTRUE(tr$ok)) {
   ok_all("truncated: coverages differ and short members are padded", list(
     "coverages differ" = length(unique(as.integer(tr$aligned$frame_left))) > 2,
     "padded" = grepl("padded to a common frame", tr$log) && !grepl("alignment lengths differ", tr$log)))
+  check_node_history(tr$nodes, "truncated", run = tr)
 }
 
 cat("== marks: known antibodies read from merge's annotations table ==\n")
@@ -510,6 +620,7 @@ if (g$ok) {
   check_topology(g$nodes, "tiny")
   check_node_sequences(g$nodes, "tiny", light = TRUE, run = g)
   check_node_steps(g$nodes, "tiny", light = TRUE)
+  check_node_history(g$nodes, "tiny", light = TRUE, run = g)
 } else crashed(g, first)
 
 cat("== empty: a donor that contributed nothing ==\n")

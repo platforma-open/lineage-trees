@@ -829,6 +829,52 @@ wf.body(func(args) {
 				"NT mutations", "Base changes on the " + chain + " chain since the parent node, each written as the old base, its position within the chain, and the new base.", 94000)),
 			stepColumn("unresolved_from_parent", "pl7.app/dendrogram/unresolvedPositions", "Int", "nucleotide",
 				"unresolved positions", "Positions of the " + chain + " chain that changed since the parent but were too uncertain to call either way.", 93000))
+		// Since the germline tip and since the MRCA of the observed sequences. The germline has no
+		// junction, so changes from it are in V and J only.
+		fromColumn := func(column, name, valueType, alphabet, from, label, description, priority) {
+			c := stepColumn(column, name, valueType, alphabet, label, description, priority)
+			c.spec.domain["pl7.app/dendrogram/mutations/from"] = from
+			return c
+		}
+		for alphabet in ["nucleotide", "aminoacid"] {
+			isNt := alphabet == "nucleotide"
+			stem := isNt ? "" : "aa_"
+			short := isNt ? "NT" : "AA"
+			unit := isNt ? "bases" : "amino acids"
+			shift := isNt ? 0 : 50
+			stepColumns = append(stepColumns,
+				fromColumn(stem + "mutation_count_from_germline", "pl7.app/dendrogram/mutationCount", "Int", alphabet, "germline",
+					"#" + short + " mutations from germline", "How many " + unit + " of the " + chain + " chain differ from the germline in V and J, counting only positions settled at both ends.", 92800 + shift),
+				withFont(fromColumn(stem + "mutations_from_germline", "pl7.app/dendrogram/mutationsAcquired", "String", alphabet, "germline",
+					short + " mutations from germline", "Changes on the " + chain + " chain from the germline, each written as the germline's " + (isNt ? "base" : "residue") + ", its position within the chain, and the node's.", 92700 + shift)),
+				fromColumn(stem + "mutation_rate_from_germline", "pl7.app/dendrogram/mutationRate", "Double", alphabet, "germline",
+					short + " mutation rate from germline", "Mutations from the germline over the " + chain + " chain positions settled at both ends.", 92600 + shift),
+				fromColumn(stem + "mutation_count_from_mrca", "pl7.app/dendrogram/mutationCount", "Int", alphabet, "mrca",
+					"#" + short + " mutations from MRCA", "How many " + unit + " of the " + chain + " chain differ from the most recent common ancestor of the lineage's observed sequences. Blank on nodes above it.", 92400 + shift),
+				withFont(fromColumn(stem + "mutations_from_mrca", "pl7.app/dendrogram/mutationsAcquired", "String", alphabet, "mrca",
+					short + " mutations from MRCA", "Changes on the " + chain + " chain from the most recent common ancestor of the lineage's observed sequences. Blank on nodes above it.", 92300 + shift)))
+		}
+	}
+
+	// Heavy only, over the germline's V and J flanks; inferred nodes too.
+	identityColumns := []
+	for gene in ["V", "J"] {
+		identityColumns = append(identityColumns, {
+			column: "heavy_" + text.to_lower(gene) + "_identity",
+			allowNA: true,
+			spec: {
+				name: "pl7.app/vdj/" + text.to_lower(gene) + "IdentityPercent",
+				valueType: "Double",
+				domain: { "pl7.app/vdj/chain": "IGHeavy" },
+				annotations: {
+					"pl7.app/label": "Heavy " + gene + " identity, %",
+					"pl7.app/description": "Share of the node's heavy chain " + gene + " positions that match the germline, over positions settled at both ends.",
+					"pl7.app/min": "0",
+					"pl7.app/max": "100",
+					"pl7.app/table/orderPriority": gene == "V" ? "92200" : "92100"
+				}
+			}
+		})
 	}
 
 	sequenceColumns := []
@@ -952,7 +998,25 @@ wf.body(func(args) {
 					"pl7.app/min": "0"
 				}
 			}
-		}] + stepColumns + sequenceColumns + [noTreeReasonColumn("96000", "hidden")]
+		}, {
+			column: "distance_from_germline",
+			allowNA: true,
+			spec: {
+				name: "pl7.app/dendrogram/distance",
+				valueType: "Double",
+				domain: {
+					"pl7.app/dendrogram/distance/from": "germline",
+					"pl7.app/dendrogram/distance/unit": distanceUnit,
+					"pl7.app/dendrogram/chainSet": chainSet
+				},
+				annotations: {
+					"pl7.app/label": "Distance from germline",
+					"pl7.app/description": "How much change the tree estimated between this node and the germline, along the branches joining them.",
+					"pl7.app/dendrogram/distance/from": "germline",
+					"pl7.app/dendrogram/isDistance": "true"
+				}
+			}
+		}] + identityColumns + stepColumns + sequenceColumns + [noTreeReasonColumn("96000", "hidden")]
 	}, { splitDataAndSpec: true }))
 
 	// Clonotype properties on tree axes (the dendrogram cannot follow a linker); the tooltip
