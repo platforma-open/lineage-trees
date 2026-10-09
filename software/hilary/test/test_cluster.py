@@ -329,6 +329,17 @@ def main(tmp: Path) -> None:
     v_of = read(props / "properties.tsv").set_index("lineage_id")["v_call"].to_dict()
     ok("node properties keep each donor's V call for a clonotype in two donors",
        v_of == {"L1": "IGHV1-2*02", "L2": "IGHV1-2*04"})
+    # Alleles on nodes: V is the inferred allele where allele inference set one, else the producer's.
+    shown = cluster._with_alleles(pd.DataFrame({
+        "sequence_id": ["a", "b"], "v_call": ["IGHV1-2*04", "IGHV3-23"],
+        "v_allele_hit": ["IGHV1-2*02", "IGHV3-23*01"], "d_allele_hit": ["IGHD3-10*01", ""],
+        "j_allele_hit": ["IGHJ4*02", "IGHJ6*01"]})).set_index("sequence_id")
+    ok("node V allele is the inferred one where v_call carries it, else the producer's; D and J the producer's",
+       shown["v_allele"].tolist() == ["IGHV1-2*04", "IGHV3-23*01"]
+       and shown["d_allele"].tolist() == ["IGHD3-10*01", ""] and shown["j_allele"].tolist() == ["IGHJ4*02", "IGHJ6*01"])
+    props_out = read(props / "properties.tsv")
+    ok("node properties always carry the allele and VDJRegion columns",
+       {"v_allele", "d_allele", "j_allele", "vdj_region"} <= set(props_out.columns))
 
     # The full method compares rows base by base, so padding must not read as a difference:
     # a member with shorter 5' and 3' coverage pads with its gene's germline, not N.

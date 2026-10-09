@@ -25,3 +25,7 @@ identity to the germline.
 Reads, UMIs and cells are summed per node and per lineage, each from the datasets that count
 it, and blank where none does. The node's primary abundance is now shown only when every
 dataset counts in the same unit, rather than adding reads to UMIs.
+
+The tree's node table now lists observed sequences only and opens on their V, D and J alleles,
+CDR3 and VDJRegion. Steps and mutation columns, including those from the MRCA, open on the
+mutational path and basket tables instead.

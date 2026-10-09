@@ -26,7 +26,14 @@ import type { GraphMakerState } from "@milaboratories/graph-maker";
 import { kind } from "@platforma-open/milaboratories.lineage-trees.kind";
 import type { SOIList } from "./soi";
 import { describeRun } from "./runStatement";
-import { byDepth, lineageFilter, nodeTable, nodeTableParts, nodesFilter } from "./nodeTables";
+import {
+  byDepth,
+  lineageFilter,
+  nodeTable,
+  nodeTableParts,
+  nodesFilter,
+  observedFilter,
+} from "./nodeTables";
 
 export * from "./soi";
 
@@ -979,9 +986,9 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
 
     const tables: Record<string, PlDataTableModel> = {};
     for (const view of views) {
-      const table = nodeTable(ctx, parts, view.tableState ?? createPlDataTableStateV2(), {
+      const table = nodeTable(ctx, parts, "tree", view.tableState ?? createPlDataTableStateV2(), {
         type: "and",
-        filters: [lineageFilter(parts, view.lineageId)],
+        filters: [lineageFilter(parts, view.lineageId), ...observedFilter(parts)],
       });
       if (table !== undefined) tables[view.id] = table;
     }
@@ -999,7 +1006,7 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
 
     const tables: Record<string, PlDataTableModel> = {};
     for (const view of views) {
-      const table = nodeTable(ctx, parts, view.tableState, {
+      const table = nodeTable(ctx, parts, "path", view.tableState, {
         type: "and",
         filters: [lineageFilter(parts, view.lineageId), nodesFilter(parts, view.nodeIds)],
       });
@@ -1035,6 +1042,7 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       const table = nodeTable(
         ctx,
         parts,
+        "path",
         basket.tableState ?? createPlDataTableStateV2(),
         {
           type: "or",

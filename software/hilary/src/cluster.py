@@ -531,7 +531,8 @@ NODE_PROPERTY_SOURCE_COLUMNS = ["v_call", "j_call", "junction", "cdr1_aa", "cdr2
                                 "sequence_aa", "main_sequence",
                                 "v_call_light", "j_call_light", "junction_light", "cdr1_aa_light",
                                 "cdr2_aa_light", "cdr3_aa_light", "sequence_aa_light",
-                                "main_sequence_light", "is_known"]
+                                "main_sequence_light", "is_known",
+                                "v_allele", "d_allele", "j_allele", "vdj_region"]
 KNOWN_DISTANCE_COLUMNS = ["sequence_id", "known_id", "known_aa_heavy", "known_nt_heavy",
                            "known_aa_light", "known_nt_light"]
 NODE_PROPERTY_COLUMNS = ["lineage_id", "node_id", *NODE_PROPERTY_SOURCE_COLUMNS]
@@ -665,6 +666,19 @@ def _lineage_descriptors(
     return described
 
 
+def _with_alleles(clonotypes: pd.DataFrame) -> pd.DataFrame:
+    """Heavy V, D and J alleles to show: V is the donor's inferred allele where allele inference
+    rewrote v_call to one, else the producer's; D and J are the producer's."""
+    out = clonotypes.copy()
+    blank = pd.Series("", index=out.index)
+    hit = lambda column: out[column].fillna("").astype(str) if column in out.columns else blank
+    call = hit("v_call")
+    out["v_allele"] = call.where(call.str.contains("*", regex=False), hit("v_allele_hit"))
+    out["d_allele"] = hit("d_allele_hit")
+    out["j_allele"] = hit("j_allele_hit")
+    return out
+
+
 def _node_properties(links: pd.DataFrame, clonotypes: pd.DataFrame,
                      lineages: pd.DataFrame) -> pd.DataFrame:
     """Copy each observed node's representative clonotype onto the node's axes.
@@ -673,6 +687,7 @@ def _node_properties(links: pd.DataFrame, clonotypes: pd.DataFrame,
     Per donor where the tables carry one: alleles are inferred per donor, so a clonotype
     in two donors may have a different V call in each.
     """
+    clonotypes = _with_alleles(clonotypes)
     available = [c for c in NODE_PROPERTY_SOURCE_COLUMNS if c in clonotypes.columns]
     if "is_representative" in links.columns:
         links = links[links["is_representative"] == "true"]

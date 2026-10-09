@@ -60,12 +60,15 @@ wf.prepare(func(args) {
 				domain: { "pl7.app/vdj/reference": gene + "Gene" }
 			}, bundleKey(gene + "Gene", i))
 		}
-		// Allele inference groups by allele; import-vdj-data strips it from the gene hit.
-		bundleBuilder.addMulti({
-			axes: [{ anchor: anchor, idx: 1 }],
-			name: "pl7.app/vdj/geneHitWithAllele",
-			domain: { "pl7.app/vdj/reference": "VGene" }
-		}, bundleKey("VAllele", i))
+		// Allele inference groups by allele; import-vdj-data strips it from the gene hit. D and J
+		// alleles only label the tree's observed nodes.
+		for gene in ["V", "D", "J"] {
+			bundleBuilder.addMulti({
+				axes: [{ anchor: anchor, idx: 1 }],
+				name: "pl7.app/vdj/geneHitWithAllele",
+				domain: { "pl7.app/vdj/reference": gene + "Gene" }
+			}, bundleKey(gene + "Allele", i))
+		}
 
 		// MiXCR's CDR3 spans Cys to Trp/Phe, i.e. AIRR's junction.
 		bundleBuilder.addMulti({
@@ -295,6 +298,13 @@ wf.body(func(args) {
 			}
 		}
 		addChain(heavyKey, "")
+		// The producer's heavy alleles and VDJRegion, shown on observed nodes.
+		for entry in [["VAllele", "v_allele_hit"], ["DAllele", "d_allele_hit"], ["JAllele", "j_allele_hit"], ["vdjRegion", "vdj_region"]] {
+			column := optionalHeavyOf(entry[0])
+			if !is_undefined(column) {
+				clonotypeTableBuilder.add(column, { header: entry[1] })
+			}
+		}
 		// Isotype is the heavy chain's; collect derives it from c_call where no isotype column came.
 		hasIsotype := false
 		for entry in [["isotype", "isotype"], ["CGene", "c_call"]] {
@@ -1153,7 +1163,23 @@ wf.body(func(args) {
 			}
 			return aaSequence(column + suffix, feature, label + name, description, domain, id)
 		}
-		return [
+		alleles := []
+		if isHeavy {
+			for g in ["V", "D", "J"] {
+				alleles = append(alleles, nodeProperty(text.to_lower(g) + "_allele", {
+					name: "pl7.app/vdj/geneHitWithAllele",
+					valueType: "String",
+					domain: { "pl7.app/vdj/reference": g + "Gene" },
+					annotations: {
+						"pl7.app/label": g + " allele",
+						"pl7.app/description": g + " allele of the clonotype at this node" + (g == "V" ? ": the donor's inferred allele where allele inference reassigned it, else the producer's." : ", as the producer called it.")
+					}
+				}))
+			}
+			alleles = append(alleles, ntSequence("vdj_region", "VDJRegion", "VDJRegion nt",
+				"Observed VDJRegion nucleotide sequence of the clonotype at this node, where the producer gives one.", {}, "vdjRegionNt"))
+		}
+		return alleles + [
 			gene("v_call", "VGene", "V gene"),
 			gene("j_call", "JGene", "J gene"),
 			aa("cdr1_aa", "CDR1", "CDR1 aa", lead + "CDR1 amino acid sequence of the clonotype at this node.", undefined),
