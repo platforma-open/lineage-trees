@@ -16,6 +16,12 @@ type Leading = { name: string; label?: string; last?: boolean }[];
 const LEADING_COLUMNS = {
   // The tree's own table lists observed sequences only, so it leads with what was observed.
   tree: [
+    { name: "pl7.app/clustering/donor", label: "Donor" },
+    { name: "pl7.app/vdj/vIdentityPercent", label: "Heavy V identity, %" },
+    { name: "pl7.app/vdj/jIdentityPercent", label: "Heavy J identity, %" },
+    { name: "pl7.app/dendrogram/nodeCount", label: "UMIs" },
+    { name: "pl7.app/dendrogram/nodeCount", label: "Reads" },
+    { name: "pl7.app/vdj/isotype", label: "Isotype" },
     { name: "pl7.app/vdj/geneHitWithAllele", label: "V allele" },
     { name: "pl7.app/vdj/geneHitWithAllele", label: "D allele" },
     { name: "pl7.app/vdj/geneHitWithAllele", label: "J allele" },
@@ -71,13 +77,18 @@ export function nodeTableParts(columns: PColumn<TreeNodeAccessor>[] | undefined)
   const nodeScoped = columns.filter((column) => column.spec.axesSpec.length === 2);
   if (nodeScoped.length === 0) return undefined;
 
-  const recipes = nodeScoped.map((column) => DataColumn.fromColumn(column));
+  const axes = nodeScoped[0].spec.axesSpec;
+  // Lineage columns join on the lineage axis, so the node tables can show the donor beside a node.
+  const lineageScoped = columns.filter(
+    (column) =>
+      column.spec.axesSpec.length === 1 && column.spec.axesSpec[0]?.name === axes[0]?.name,
+  );
+  const recipes = [...nodeScoped, ...lineageScoped].map((column) => DataColumn.fromColumn(column));
   const depth = recipes.find((recipe) => recipe.getSpec().name === NODE_DEPTH_COLUMN);
   if (depth === undefined) return undefined;
   const observed = recipes.find(
     (recipe) => recipe.getSpec().name === "pl7.app/dendrogram/isObserved",
   );
-  const axes = nodeScoped[0].spec.axesSpec;
   return {
     recipes,
     depth,

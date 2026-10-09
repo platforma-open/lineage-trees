@@ -1553,6 +1553,13 @@ wf.body(func(args) {
 	maps.forEach(nodeMetadata, add(treeNodesFrameBuilder))
 	maps.forEach(nodeAbundance, add(treeNodesFrameBuilder))
 	maps.forEach(nodeClonotypeLinks, add(treeNodesFrameBuilder))
+	// The only lineage column the node tables show: constant down a lineage, but worth having
+	// beside a node when rows are read or exported on their own.
+	maps.forEach(lineageStats, func(key, value) {
+		if value.spec.name == "pl7.app/clustering/donor" {
+			treeNodesFrameBuilder.add(key, value.spec, value.data)
+		}
+	})
 	treeNodesFrame := treeNodesFrameBuilder.build()
 
 	// The lineage axis's label for other blocks, so tables reaching it through the clonotype
