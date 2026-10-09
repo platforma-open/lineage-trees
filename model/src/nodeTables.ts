@@ -10,37 +10,65 @@ import {
 /** Distance from the germline in nodes; orders path tables. */
 export const NODE_DEPTH_COLUMN = "pl7.app/dendrogram/nodeDepth";
 
-/** Default columns in display order, matched by name and label (heavy and light share a name). `last` puts wide ones at the end. */
-const PATH_LEADING_COLUMNS: { name: string; label?: string; last?: boolean }[] = [
-  { name: NODE_DEPTH_COLUMN },
-  { name: "pl7.app/dendrogram/isObserved" },
-  { name: "pl7.app/dendrogram/mutationCount", label: "Heavy #AA mutations" },
-  { name: "pl7.app/dendrogram/mutationsAcquired", label: "Heavy AA mutations" },
-  { name: "pl7.app/dendrogram/mutationCount", label: "Heavy #NT mutations" },
-  { name: "pl7.app/dendrogram/mutationsAcquired", label: "Heavy NT mutations" },
-  { name: "pl7.app/vdj/sequence", label: "CDR3 aa" },
-  { name: "pl7.app/vdj/sequenceAlignment", label: "Heavy reconstructed sequence", last: true },
-  { name: "pl7.app/vdj/sequenceAlignment", label: "Light reconstructed sequence", last: true },
-];
+type Leading = { name: string; label?: string; last?: boolean }[];
+
+/** Default columns in display order per table, matched by name and label (heavy and light share a name). `last` puts wide ones at the end. */
+const LEADING_COLUMNS = {
+  // The tree's own table lists observed sequences only, so it leads with what was observed.
+  tree: [
+    { name: "pl7.app/clustering/donor", label: "Donor" },
+    { name: "pl7.app/vdj/vIdentityPercent", label: "Heavy V identity, %" },
+    { name: "pl7.app/vdj/jIdentityPercent", label: "Heavy J identity, %" },
+    { name: "pl7.app/dendrogram/nodeCount", label: "UMIs" },
+    { name: "pl7.app/dendrogram/nodeCount", label: "Reads" },
+    { name: "pl7.app/vdj/isotype", label: "Isotype" },
+    { name: "pl7.app/vdj/geneHitWithAllele", label: "V allele" },
+    { name: "pl7.app/vdj/geneHitWithAllele", label: "D allele" },
+    { name: "pl7.app/vdj/geneHitWithAllele", label: "J allele" },
+    { name: "pl7.app/vdj/sequence", label: "CDR3 aa" },
+    { name: "pl7.app/vdj/sequence", label: "VDJRegion nt", last: true },
+  ],
+  // Paths and baskets hold inferred nodes too: steps and changes since the parent and the MRCA.
+  path: [
+    { name: NODE_DEPTH_COLUMN },
+    { name: "pl7.app/dendrogram/isObserved" },
+    { name: "pl7.app/dendrogram/mutationCount", label: "Heavy #AA mutations" },
+    { name: "pl7.app/dendrogram/mutationsAcquired", label: "Heavy AA mutations" },
+    { name: "pl7.app/dendrogram/mutationCount", label: "Heavy #NT mutations" },
+    { name: "pl7.app/dendrogram/mutationsAcquired", label: "Heavy NT mutations" },
+    { name: "pl7.app/dendrogram/mutationCount", label: "Heavy #AA mutations from MRCA" },
+    { name: "pl7.app/dendrogram/mutationsAcquired", label: "Heavy AA mutations from MRCA" },
+    { name: "pl7.app/dendrogram/mutationCount", label: "Heavy #NT mutations from MRCA" },
+    { name: "pl7.app/dendrogram/mutationsAcquired", label: "Heavy NT mutations from MRCA" },
+    { name: "pl7.app/vdj/sequence", label: "CDR3 aa" },
+    { name: "pl7.app/vdj/sequenceAlignment", label: "Heavy reconstructed sequence", last: true },
+    { name: "pl7.app/vdj/sequenceAlignment", label: "Light reconstructed sequence", last: true },
+  ],
+} satisfies Record<string, Leading>;
+export type NodeTableKind = keyof typeof LEADING_COLUMNS;
 
 // Selectors are regexes by default; exact match keeps "V gene" from matching "Light V gene".
-const PATH_LEADING_SELECTORS = PATH_LEADING_COLUMNS.map((wanted) => ({
-  name: { type: "exact" as const, value: wanted.name },
-  ...(wanted.label === undefined
-    ? {}
-    : { annotations: { "pl7.app/label": { type: "exact" as const, value: wanted.label } } }),
-}));
+const selectorsOf = (leading: Leading) =>
+  leading.map((wanted) => ({
+    name: { type: "exact" as const, value: wanted.name },
+    ...(wanted.label === undefined
+      ? {}
+      : { annotations: { "pl7.app/label": { type: "exact" as const, value: wanted.label } } }),
+  }));
 
-// Leading columns rank above the workflow's orderPriority, `last` ones below it.
-const PATH_DISPLAY_OPTIONS = {
-  ordering: PATH_LEADING_SELECTORS.map((match, i) => ({
-    match,
-    priority: (PATH_LEADING_COLUMNS[i].last ? -1_000_000 : 1_000_000) - i,
-  })),
-  visibility: [
-    ...PATH_LEADING_SELECTORS.map((match) => ({ match, visibility: "default" as const })),
-    { match: { name: { type: "regex" as const, value: ".*" } }, visibility: "optional" as const },
-  ],
+// Leading columns rank above the workflow's orderPriority, `last` ones below it; the rest start hidden.
+const displayOptionsOf = (leading: Leading) => {
+  const selectors = selectorsOf(leading);
+  return {
+    ordering: selectors.map((match, i) => ({
+      match,
+      priority: (leading[i].last ? -1_000_000 : 1_000_000) - i,
+    })),
+    visibility: [
+      ...selectors.map((match) => ({ match, visibility: "default" as const })),
+      { match: { name: { type: "regex" as const, value: ".*" } }, visibility: "optional" as const },
+    ],
+  };
 };
 
 /** Columns split into leading and the rest. Undefined until a tree exists: no depth, no order. */
@@ -49,22 +77,43 @@ export function nodeTableParts(columns: PColumn<TreeNodeAccessor>[] | undefined)
   const nodeScoped = columns.filter((column) => column.spec.axesSpec.length === 2);
   if (nodeScoped.length === 0) return undefined;
 
-  const recipes = nodeScoped.map((column) => DataColumn.fromColumn(column));
+  const axes = nodeScoped[0].spec.axesSpec;
+  // Lineage columns join on the lineage axis, so the node tables can show the donor beside a node.
+  const lineageScoped = columns.filter(
+    (column) =>
+      column.spec.axesSpec.length === 1 && column.spec.axesSpec[0]?.name === axes[0]?.name,
+  );
+  const recipes = [...nodeScoped, ...lineageScoped].map((column) => DataColumn.fromColumn(column));
   const depth = recipes.find((recipe) => recipe.getSpec().name === NODE_DEPTH_COLUMN);
   if (depth === undefined) return undefined;
-  // Columns the run lacks are skipped.
-  const leading = PATH_LEADING_COLUMNS.map((wanted) =>
-    recipes.find((recipe) => {
-      const spec = recipe.getSpec();
-      return (
-        spec.name === wanted.name &&
-        (wanted.label === undefined || spec.annotations?.["pl7.app/label"] === wanted.label)
-      );
-    }),
-  ).filter((recipe) => recipe !== undefined);
-  const rest = recipes.filter((recipe) => !leading.includes(recipe));
-  const axes = nodeScoped[0].spec.axesSpec;
-  return { leading, rest, depth, lineageAxis: getAxisId(axes[0]), nodeAxis: getAxisId(axes[1]) };
+  const observed = recipes.find(
+    (recipe) => recipe.getSpec().name === "pl7.app/dendrogram/isObserved",
+  );
+  return {
+    recipes,
+    depth,
+    observed,
+    lineageAxis: getAxisId(axes[0]),
+    nodeAxis: getAxisId(axes[1]),
+  };
+}
+
+/** A table's leading columns, those the run has, and the rest. */
+function split(parts: NodeTableParts, kind: NodeTableKind) {
+  const leading = LEADING_COLUMNS[kind]
+    .map((wanted: Leading[number]) =>
+      parts.recipes.find((recipe) => {
+        const spec = recipe.getSpec();
+        return (
+          spec.name === wanted.name &&
+          (wanted.label === undefined || spec.annotations?.["pl7.app/label"] === wanted.label)
+        );
+      }),
+    )
+    .filter((recipe) => recipe !== undefined);
+  // A run without any of the kind's columns still needs a primary column.
+  if (leading.length === 0) leading.push(parts.depth);
+  return { leading, rest: parts.recipes.filter((recipe) => !leading.includes(recipe)) };
 }
 
 export type NodeTableParts = NonNullable<ReturnType<typeof nodeTableParts>>;
@@ -84,6 +133,18 @@ export const nodesFilter = (parts: NodeTableParts, nodeIds: string[]) => ({
   value: nodeIds,
 });
 
+/** Observed nodes only, for the tree's own table. No filter if the run has no such column. */
+export const observedFilter = (parts: NodeTableParts) =>
+  parts.observed === undefined
+    ? []
+    : [
+        {
+          type: "patternEquals" as const,
+          column: { type: "column" as const, id: parts.observed.id },
+          value: "true",
+        },
+      ];
+
 /** Germline first. */
 export const byDepth = (parts: NodeTableParts) => ({
   column: { type: "column" as const, id: parts.depth.id },
@@ -92,7 +153,7 @@ export const byDepth = (parts: NodeTableParts) => ({
 });
 
 /**
- * A node table with the path table's columns and ordering. `filters` is the view itself (its
+ * A node table with its kind's default columns and ordering. `filters` is the view itself (its
  * lineage, its nodes), not a user filter: the SDK would show it in the filter panel as a default
  * filter, where clearing it shows every lineage. So a saved view's default filters are ignored,
  * and the panel gets none.
@@ -100,19 +161,21 @@ export const byDepth = (parts: NodeTableParts) => ({
 export function nodeTable(
   ctx: Parameters<typeof createPlDataTableV3>[0],
   parts: NodeTableParts,
+  kind: NodeTableKind,
   tableState: TableOptions["tableState"],
   filters: TableOptions["filters"],
   sorting: TableOptions["sorting"] = [byDepth(parts)],
 ) {
   const state = upgradePlDataTableStateV2(tableState);
+  const { leading, rest } = split(parts, kind);
   const table = createPlDataTableV3(ctx, {
-    primaryColumns: parts.leading,
-    columns: parts.rest,
+    primaryColumns: leading,
+    columns: rest,
     tableState:
       state.pTableParams.sourceId === null
         ? state
         : { ...state, pTableParams: { ...state.pTableParams, defaultFilters: null } },
-    displayOptions: PATH_DISPLAY_OPTIONS,
+    displayOptions: displayOptionsOf(LEADING_COLUMNS[kind]),
     filters,
     sorting,
   });

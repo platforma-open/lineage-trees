@@ -138,9 +138,17 @@ ALIGNED_COLUMNS <- c("sequence_id", "v_call", "j_call", "junction", "sequence_al
 STEP_COLUMNS <- unlist(lapply(c("heavy", "light"), function(chain) paste0(chain, c(
   "_mutations_from_parent", "_mutation_count_from_parent", "_unresolved_from_parent",
   "_aa_mutations_from_parent", "_aa_mutation_count_from_parent"))))
+# Changes since the germline and since the MRCA of the observed sequences, by chain and alphabet,
+# and the heavy chain's identity to its V and J germline.
+HISTORY_COLUMNS <- c("distance_from_germline", unlist(lapply(c("heavy", "light"), function(chain) paste0(chain, c(
+  "_mutations_from_germline", "_mutation_count_from_germline", "_mutation_rate_from_germline",
+  "_aa_mutations_from_germline", "_aa_mutation_count_from_germline", "_aa_mutation_rate_from_germline",
+  "_mutations_from_mrca", "_mutation_count_from_mrca",
+  "_aa_mutations_from_mrca", "_aa_mutation_count_from_mrca")))),
+  "heavy_v_identity", "heavy_j_identity")
 NODE_COLUMNS <- c("lineage_id", "node_id", "parent_id", "distance", "is_observed", "label",
                   "heavy_sequence", "light_sequence", "node_depth",
-                  "terminal_branch_fraction", "parent_descendant_count", STEP_COLUMNS)
+                  "terminal_branch_fraction", "parent_descendant_count", STEP_COLUMNS, HISTORY_COLUMNS)
 # Every distance is to the one known antibody `known_id` names, chosen by the heavy chain.
 # Heavy chain differences from the germline, per clonotype.
 GERMLINE_MUTATION_COLUMNS <- c("sequence_id", "lineage_id", "germline_mutation_count")
@@ -1014,6 +1022,8 @@ mask_stops <- function(g, label) {
 }
 
 frames <- list()
+# The heavy germline's V and J widths per lineage: the padded flanks either side of the junction.
+vj_widths <- list()
 lineages <- rows_by_lineage(resolved)
 skip_flag <- logical(length(lineages))
 r_heavy <- resolved$locus == HEAVY
@@ -1053,6 +1063,7 @@ for (k in seq_along(lineages)) {
     }
     g <- consensus_germline(d$germline_alignment)
     d$germline_alignment_d_mask <- mask_stops(g, paste(lid, loc))
+    if (loc == HEAVY) vj_widths[[lid]] <- c(max(d$frame_left), max(d$frame_right))
     parts[[loc]] <- d
   }
   if (!ok) { skip_flag[k] <- TRUE; next }
@@ -1246,8 +1257,9 @@ collapse_tree <- function(p) {
 }
 
 # Node rows and known antibody distances for one tree. `lid` is the real lineage id, `gapped_*`
-# the rebuilt rows with their deletions, `heavy_width` where heavy ends (dowser joins heavy then light).
-tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer_) {
+# the rebuilt rows with their deletions, `heavy_width` where heavy ends (dowser joins heavy then light),
+# `vj` the heavy germline's V and J widths.
+tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer_, vj = NULL) {
   known <- NULL
   # Tips carry surrogate ids (see TIP_REAL); "Germline" and anything unmapped stay as they are.
   tips <- p$tip.label
@@ -1297,6 +1309,30 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
   terminal_fraction <- ifelse(!is.na(dist) & !is.na(root_dist) & root_dist > 0, dist / root_dist, NA_real_)
   parent_descendants <- ifelse(is.na(parent), NA_integer_, below[parent])
 
+  # Each node against the germline tip and against the MRCA of the observed tips: the deepest
+  # node with every observed tip below it. One pass each, deep trees included.
+  germ <- match("Germline", labels)
+  holds_all <- which(below == sum(!is.na(labels) & labels != "Germline") & below > 0)
+  mrca <- if (length(holds_all)) holds_all[which.max(depth[holds_all])] else NA_integer_
+  in_mrca <- logical(length(labels))
+  if (!is.na(mrca)) {
+    in_mrca[mrca] <- TRUE
+    for (e in seq_len(nrow(edge))) if (in_mrca[edge[e, 1]]) in_mrca[edge[e, 2]] <- TRUE
+  }
+  # Path length to the germline, through the nearest ancestor the two share.
+  from_germline <- rep(NA_real_, length(labels))
+  if (!is.na(germ)) {
+    on_germ_line <- logical(length(labels))
+    n <- germ
+    while (!is.na(n)) { on_germ_line[n] <- TRUE; n <- parent[n] }
+    shared <- seq_along(labels)
+    for (e in seq_len(nrow(edge))) {
+      child <- edge[e, 2]
+      if (!on_germ_line[child]) shared[child] <- shared[edge[e, 1]]
+    }
+    from_germline <- root_dist + root_dist[germ] - 2 * root_dist[shared]
+  }
+
   # A mutation needs a settled base at both ends; otherwise it counts as unresolved.
   # Counted per chain (1-based in the chain's rebuilt frame, not IMGT) and per alphabet;
   # a chain that is not whole codons gets no amino acid figures.
@@ -1314,6 +1350,22 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
     list(text = paste(paste0(from[differs][settled], differs[settled], to[differs][settled]),
                       collapse = ","),
          count = sum(settled), unresolved = sum(!settled))
+  }
+  # Since the germline (with rates over the positions settled at both ends) and since the MRCA.
+  against <- function(seqs, alphabet, from, nodes, rate = FALSE) {
+    text <- rep(NA_character_, n_nodes)
+    count <- rep(NA_integer_, n_nodes)
+    share <- rep(NA_real_, n_nodes)
+    if (is.na(from) || is.null(seqs)) return(list(text = text, count = count, rate = share))
+    for (n in nodes) {
+      if (length(seqs[[from]]) != length(seqs[[n]])) next
+      b <- branch_step(seqs[[from]], seqs[[n]], alphabet)
+      text[n] <- b$text
+      count[n] <- b$count
+      compared <- sum(seqs[[from]] %in% alphabet & seqs[[n]] %in% alphabet)
+      if (rate && compared > 0) share[n] <- b$count / compared
+    }
+    list(text = text, count = count, rate = share)
   }
   steps <- list()
   # Whether a node carries the chain: a missing light chain is all N.
@@ -1346,9 +1398,29 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
         s$aa_count[n] <- b$count
       }
     }
+    everyone <- seq_len(n_nodes)
+    s$germline_nt <- against(nt, UNAMBIGUOUS, germ, everyone, rate = TRUE)
+    s$germline_aa <- against(aa, SETTLED_AA, germ, everyone, rate = TRUE)
+    s$mrca_nt <- against(nt, UNAMBIGUOUS, mrca, which(in_mrca))
+    s$mrca_aa <- against(aa, SETTLED_AA, mrca, which(in_mrca))
+    # Identity to the V and J germline, heavy only: the flanks before and after the junction.
+    if (chain == "heavy" && !is.null(vj) && !is.na(germ) && all(vj > 0) && sum(vj) <= length(nt[[germ]])) {
+      identity <- function(cols) vapply(nt, function(x) {
+        if (length(x) != length(nt[[germ]])) return(NA_real_)
+        both <- x[cols] %in% UNAMBIGUOUS & nt[[germ]][cols] %in% UNAMBIGUOUS
+        if (!any(both)) NA_real_ else 100 * mean(x[cols][both] == nt[[germ]][cols][both])
+      }, numeric(1))
+      heavy_cols <- length(nt[[germ]])
+      s$v_identity <- identity(seq_len(vj[1]))
+      s$j_identity <- identity(seq.int(heavy_cols - vj[2] + 1L, heavy_cols))
+    }
     carried <- vapply(nt, function(x) any(x %in% UNAMBIGUOUS), logical(1))
     # A light half no node settles is padding, not a chain: blank, not zero.
     if (chain == "light" && !any(carried)) next
+    # Nor is a node's own light half it does not carry.
+    if (chain == "light") for (k in c("germline_nt", "germline_aa", "mrca_nt", "mrca_aa")) {
+      s[[k]] <- lapply(s[[k]], function(v) { v[!carried] <- NA; v })
+    }
     steps[[chain]] <- s
     carries[[chain]] <- carried
   }
@@ -1433,7 +1505,19 @@ tree_rows <- function(p, lid, gapped_tips, gapped_germ, heavy_width = NA_integer
     nodes[[paste0(chain, "_unresolved_from_parent")]] <- if (is.null(s)) blank_count else s$unresolved
     nodes[[paste0(chain, "_aa_mutations_from_parent")]] <- if (is.null(s)) blank_text else s$aa_text
     nodes[[paste0(chain, "_aa_mutation_count_from_parent")]] <- if (is.null(s)) blank_count else s$aa_count
+    blank_rate <- rep(NA_real_, n_nodes)
+    for (to in c("germline", "mrca")) for (alphabet in c("nt", "aa")) {
+      got <- s[[paste0(to, "_", alphabet)]]
+      stem <- paste0(chain, if (alphabet == "aa") "_aa" else "")
+      nodes[[paste0(stem, "_mutations_from_", to)]] <- if (is.null(got)) blank_text else got$text
+      nodes[[paste0(stem, "_mutation_count_from_", to)]] <- if (is.null(got)) blank_count else got$count
+      if (to == "germline") nodes[[paste0(stem, "_mutation_rate_from_", to)]] <- if (is.null(got)) blank_rate else got$rate
+    }
   }
+  nodes$distance_from_germline <- from_germline
+  heavy_steps <- steps$heavy
+  nodes$heavy_v_identity <- if (is.null(heavy_steps$v_identity)) NA_real_ else heavy_steps$v_identity
+  nodes$heavy_j_identity <- if (is.null(heavy_steps$j_identity)) NA_real_ else heavy_steps$j_identity
   list(nodes = nodes[order(nodes$node_id), NODE_COLUMNS], known = known)
 }
 
@@ -1448,7 +1532,7 @@ finish_lineage <- function(step, u) {
   # dowser's record says where the heavy chain ends; our gapped germline is the fallback.
   heavy_width <- tryCatch(nchar(step$tree$data[[1]]@germline), error = function(e) NA_integer_)
   if (is.na(heavy_width) && !is.null(u$gapped_germ) && !is.na(u$gapped_germ)) heavy_width <- nchar(u$gapped_germ)
-  c(out, tree_rows(p, u$lid, u$gapped_tips, u$gapped_germ, heavy_width),
+  c(out, tree_rows(p, u$lid, u$gapped_tips, u$gapped_germ, heavy_width, u$vj),
     list(clone_id = as.character(step$tree$clone_id[1]),
          builder = BUILDER_LABEL[[step$builder]],
          nodes_before = before, nodes_after = p$Nnode))
@@ -1661,8 +1745,9 @@ slots <- 0L
 unit_base <- function(key, build, part, label) {
   slots <<- slots + 1L
   gapped_tips <- tips_by_lineage[[key]]
+  lid <- unname(real_lineage[key])
   list(slot = slots, build = build, part = part, label = label,
-       size = length(tip_rows[[key]]), lid = unname(real_lineage[key]),
+       size = length(tip_rows[[key]]), lid = lid, vj = vj_widths[[lid]],
        gapped_tips = if (is.null(gapped_tips)) character(0) else gapped_tips,
        gapped_germ = unname(gapped_germline[key]))
 }

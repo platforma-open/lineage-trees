@@ -21,7 +21,11 @@ const TIMEOUT = 2_400_000;
 // CI runs only the end-to-end test below; FULL_BLOCK_TESTS=1 runs the rest too, locally.
 const fullTest = blockTest.skipIf(process.env.FULL_BLOCK_TESTS !== "1");
 
-type TreeNodeColumns = { hasKnownProperty: boolean; topologyId: string };
+type TreeNodeColumns = {
+  hasKnownProperty: boolean;
+  hasIsotypeProperty: boolean;
+  topologyId: string;
+};
 
 function expectTrees({ expect }: TestCtx, outputs: Outputs, label?: string) {
   expect(value(outputs, "noTreesReason"), label).toBeUndefined();
@@ -316,6 +320,8 @@ blockTest("end to end", { timeout: 900_000 }, async ({ rawPrj, helpers, expect, 
   expectTrees(ctx, outputs);
   expectClustered(ctx, outputs);
   ctx.expect(value<TreeNodeColumns>(outputs, "treeNodeColumns")?.hasKnownProperty).toBe(true);
+  // MiXCR exports an isotype column, so nodes carry one.
+  ctx.expect(value<TreeNodeColumns>(outputs, "treeNodeColumns")?.hasIsotypeProperty).toBe(true);
   ctx
     .expect(value<string>(outputs, "modeStatement"))
     .toContain("1 dataset as known antibody datasets");

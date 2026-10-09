@@ -113,6 +113,9 @@ const defaultOptions = computed(
       },
       nodeProperty("pl7.app/vdj/geneHit", "V gene"),
       nodeProperty("pl7.app/vdj/geneHit", "J gene"),
+      ...(app.model.outputs.treeNodeColumns?.hasIsotypeProperty
+        ? [nodeProperty("pl7.app/vdj/isotype", "Isotype")]
+        : []),
       // The light chain, only on runs that used light chains.
       ...(app.model.outputs.treeNodeColumns?.hasLightSequence
         ? [

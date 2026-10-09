@@ -510,9 +510,15 @@ LINEAGE_FILE_COLUMNS = [*LINEAGE_COLUMNS, "group_id"]
 STEP_COLUMNS = [f"{chain}_{what}" for chain in ("heavy", "light") for what in (
     "mutations_from_parent", "mutation_count_from_parent", "unresolved_from_parent",
     "aa_mutations_from_parent", "aa_mutation_count_from_parent")]
+# Changes since the germline and the MRCA, per chain and alphabet, and heavy V and J identity.
+HISTORY_COLUMNS = ["distance_from_germline", *[f"{chain}_{what}" for chain in ("heavy", "light") for what in (
+    "mutations_from_germline", "mutation_count_from_germline", "mutation_rate_from_germline",
+    "aa_mutations_from_germline", "aa_mutation_count_from_germline", "aa_mutation_rate_from_germline",
+    "mutations_from_mrca", "mutation_count_from_mrca",
+    "aa_mutations_from_mrca", "aa_mutation_count_from_mrca")], "heavy_v_identity", "heavy_j_identity"]
 NODE_COLUMNS = ["lineage_id", "node_id", "parent_id", "distance", "is_observed", "label",
                 "heavy_sequence", "light_sequence", "node_depth",
-                "terminal_branch_fraction", "parent_descendant_count", *STEP_COLUMNS]
+                "terminal_branch_fraction", "parent_descendant_count", *STEP_COLUMNS, *HISTORY_COLUMNS]
 # The node linker, as exported.
 NODE_LINK_COLUMNS = ["lineage_id", "node_id", "sequence_id", "link"]
 # As the tree step writes it; is_representative is read here, not exported.
@@ -525,10 +531,29 @@ NODE_PROPERTY_SOURCE_COLUMNS = ["v_call", "j_call", "junction", "cdr1_aa", "cdr2
                                 "sequence_aa", "main_sequence",
                                 "v_call_light", "j_call_light", "junction_light", "cdr1_aa_light",
                                 "cdr2_aa_light", "cdr3_aa_light", "sequence_aa_light",
-                                "main_sequence_light", "is_known"]
+                                "main_sequence_light", "is_known",
+                                "v_allele", "d_allele", "j_allele", "vdj_region"]
 KNOWN_DISTANCE_COLUMNS = ["sequence_id", "known_id", "known_aa_heavy", "known_nt_heavy",
                            "known_aa_light", "known_nt_light"]
 NODE_PROPERTY_COLUMNS = ["lineage_id", "node_id", *NODE_PROPERTY_SOURCE_COLUMNS]
+# Every count a dataset gives beside its primary abundance, by the abundance table's header.
+# Blank where no dataset of a node or lineage carries that count.
+COUNT_COLUMNS = ["reads", "umis", "cells"]
+
+
+def _count_sums(frame: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """Each count summed per key, blank where no row has it; whole numbers stay whole."""
+    counts = [c for c in COUNT_COLUMNS if c in frame.columns]
+    summed = frame.groupby(keys, as_index=False)[counts].sum(min_count=1) if counts else (
+        frame[keys].drop_duplicates())
+    for column in COUNT_COLUMNS:
+        if column not in summed.columns:
+            summed[column] = float("nan")
+        values = summed[column]
+        whole = values.dropna()
+        if (whole == whole.round(0)).all():
+            summed[column] = values.round(0).astype("Int64")
+    return summed[[*keys, *COUNT_COLUMNS]]
 
 
 
@@ -629,11 +654,31 @@ def _lineage_descriptors(
         )
         whole = described["total_abundance"].round(0)
         described["total_abundance"] = whole.astype(int) if (whole == described["total_abundance"]).all() else described["total_abundance"]
+        totals = _count_sums(present, ["lineage_id"]).set_index("lineage_id")
+        for column in COUNT_COLUMNS:
+            described[f"total_{column}"] = described["lineage_id"].map(totals[column])
     else:
         described["total_abundance"] = ""
         described["sample_count"] = ""
         described["abundance_fraction"] = ""
+        for column in COUNT_COLUMNS:
+            described[f"total_{column}"] = ""
     return described
+
+
+def _with_alleles(clonotypes: pd.DataFrame) -> pd.DataFrame:
+    """Heavy V, D and J alleles to show: V is the donor's inferred allele where allele inference
+    rewrote v_call to one, else the producer's; D and J are the producer's."""
+    out = clonotypes.copy()
+    blank = pd.Series("", index=out.index)
+    hit = lambda column: out[column].fillna("").astype(str) if column in out.columns else blank
+    call = hit("v_call")
+    # With upstream alignments the producer's V allele came in as v_allele, not v_allele_hit.
+    producer = hit("v_allele_hit").where(hit("v_allele_hit") != "", hit("v_allele"))
+    out["v_allele"] = call.where(call.str.contains("*", regex=False), producer)
+    out["d_allele"] = hit("d_allele_hit")
+    out["j_allele"] = hit("j_allele_hit")
+    return out
 
 
 def _node_properties(links: pd.DataFrame, clonotypes: pd.DataFrame,
@@ -644,6 +689,7 @@ def _node_properties(links: pd.DataFrame, clonotypes: pd.DataFrame,
     Per donor where the tables carry one: alleles are inferred per donor, so a clonotype
     in two donors may have a different V call in each.
     """
+    clonotypes = _with_alleles(clonotypes)
     available = [c for c in NODE_PROPERTY_SOURCE_COLUMNS if c in clonotypes.columns]
     if "is_representative" in links.columns:
         links = links[links["is_representative"] == "true"]
@@ -783,15 +829,17 @@ def _node_abundance(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> p
 
     No sample axis: the dendrogram could not join it.
     """
-    columns = ["lineage_id", "node_id", "abundance", "clonotype_count", "dataset"]
+    columns = ["lineage_id", "node_id", "abundance", "clonotype_count", "dataset", *COUNT_COLUMNS]
     if present is None or links.empty:
         return pd.DataFrame(columns=columns)
+    counts = [c for c in COUNT_COLUMNS if c in present.columns]
     placed = links[["lineage_id", "node_id", "sequence_id"]].merge(
-        present[["sequence_id", "lineage_id", "abundance"]], on=["lineage_id", "sequence_id"],
+        present[["sequence_id", "lineage_id", "abundance", *counts]], on=["lineage_id", "sequence_id"],
     )
     if placed.empty:
         return pd.DataFrame(columns=columns)
-    summed = placed.groupby(["lineage_id", "node_id"], as_index=False)["abundance"].sum()
+    summed = placed.groupby(["lineage_id", "node_id"], as_index=False)["abundance"].sum().merge(
+        _count_sums(placed, ["lineage_id", "node_id"]), on=["lineage_id", "node_id"])
     # Datasets as merge named them, "A, B" when seen in both. One flag per dataset rides the
     # count's groupby; single-dataset runs skip it.
     names = []
@@ -813,7 +861,62 @@ def _node_abundance(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> p
         counted = counted.drop(columns=list(flags)).assign(dataset=mask.map(labels))
     return summed.merge(counted, on=["lineage_id", "node_id"], how="right").fillna(
         {"abundance": 0, "dataset": ""},
-    ).reindex(columns=columns, fill_value="")
+    ).reindex(columns=columns)
+
+
+def _isotypes(clonotypes: pd.DataFrame) -> pd.Series:
+    """Each clonotype's isotype by id: the producer's, else its heavy C gene's class (IGHG3 is IgG)."""
+    given = (clonotypes["isotype"].fillna("").astype(str) if "isotype" in clonotypes.columns
+             else pd.Series("", index=clonotypes.index))
+    if "c_call" in clonotypes.columns:
+        cls = clonotypes["c_call"].fillna("").astype(str).str.extract(r"^IGH([ADEGM])", expand=False)
+        given = given.where(given != "", ("Ig" + cls).fillna(""))
+    return pd.Series(given.to_numpy(), index=clonotypes["sequence_id"].astype(str))
+
+
+# Counts an isotype vote is weighed in, most deduplicated first.
+ISOTYPE_WEIGHTS = ["cells", "umis", "reads"]
+
+
+def _node_isotype(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> pd.DataFrame:
+    """Each observed node's isotype, ties alphabetical.
+
+    A node is one sequence, and clonotypes split by C gene share it. One isotype among them
+    wins outright. Otherwise the isotypes are weighed in the first count every clonotype of the
+    node has (datasets count in different units, which cannot be compared); with none, the node
+    is left blank. Without abundance each clonotype weighs one. Nodes without any isotype are
+    left out.
+    """
+    columns = ["lineage_id", "node_id", "isotype"]
+    isotype = _isotypes(clonotypes.drop_duplicates("sequence_id"))
+    node = ["lineage_id", "node_id"]
+    placed = links[[*node, "sequence_id"]].drop_duplicates()
+    placed = placed.assign(isotype=placed["sequence_id"].map(isotype).fillna(""))
+    placed = placed[placed["isotype"] != ""].reset_index(drop=True)
+    if placed.empty:
+        return pd.DataFrame(columns=columns)
+    single = placed.groupby(node)["isotype"].transform("nunique") == 1
+    if present is None or present.empty:
+        placed["weight"] = 1.0
+    else:
+        units = [u for u in ISOTYPE_WEIGHTS if u in present.columns]
+        placed["weight"] = float("nan")
+        if units:
+            per = present.groupby(["lineage_id", "sequence_id"])[units].sum(min_count=1)
+            keys = pd.MultiIndex.from_arrays([placed["lineage_id"], placed["sequence_id"]])
+            values = per.reindex(keys).reset_index(drop=True)
+            open_ = placed["weight"].isna()
+            for unit in units:
+                shared = values[unit].notna().groupby([placed["lineage_id"], placed["node_id"]]).transform("all")
+                take = open_ & shared
+                placed.loc[take, "weight"] = values.loc[take, unit]
+                open_ &= ~shared
+        placed.loc[single, "weight"] = placed.loc[single, "weight"].fillna(1.0)
+    placed = placed[placed["weight"].notna()]
+    summed = placed.groupby([*node, "isotype"], as_index=False)["weight"].sum()
+    summed = summed.sort_values([*node, "weight", "isotype"],
+                                ascending=[True, True, False, True], kind="stable")
+    return summed.drop_duplicates(node)[columns]
 
 
 def _node_metadata(args: argparse.Namespace, present, links: pd.DataFrame) -> pd.DataFrame:
@@ -963,10 +1066,16 @@ def collect(args: argparse.Namespace) -> None:
             present = abundance.merge(lineages, on="sequence_id", how="inner")
         dataset_total = float(pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0).sum())
         present = present.assign(abundance=pd.to_numeric(present["abundance"], errors="coerce").fillna(0))
+        # Blank stays blank: a dataset without the count must not read as zero.
+        for column in COUNT_COLUMNS:
+            if column in present.columns:
+                present[column] = pd.to_numeric(present[column], errors="coerce")
     if args.out_node_metadata is not None:
         _node_metadata(args, present, links).to_csv(args.out_node_metadata, sep="\t", index=False)
     if args.out_node_abundance is not None:
-        _node_abundance(present, links, clonotypes).to_csv(args.out_node_abundance, sep="\t", index=False)
+        abundance = _node_abundance(present, links, clonotypes).merge(
+            _node_isotype(present, links, clonotypes), on=["lineage_id", "node_id"], how="left")
+        abundance.fillna({"isotype": ""}).to_csv(args.out_node_abundance, sep="\t", index=False)
     step("Describing lineages")
     described = _lineage_descriptors(lineages, clonotypes, present, dataset_total)
     lineage_stats = lineage_stats.merge(described, on="lineage_id", how="left")

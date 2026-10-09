@@ -26,6 +26,14 @@ hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.
 CHAIN_DOMAIN := "pl7.app/vdj/scClonotypeChain"
 CHAIN_INDEX_DOMAIN := "pl7.app/vdj/scClonotypeChain/index"
 
+// Counts summed per node and lineage beside the primary abundance: abundance table header,
+// column name, unit and its label.
+COUNTS := [
+	{ header: "reads", name: "pl7.app/vdj/readCount", unit: "reads", label: "Reads" },
+	{ header: "umis", name: "pl7.app/vdj/uniqueMoleculeCount", unit: "molecules", label: "UMIs" },
+	{ header: "cells", name: "pl7.app/vdj/uniqueCellCount", unit: "cells", label: "Cells" }
+]
+
 // Query name plus dataset position in `args.datasets` (sorted by the model).
 // Bundle anchors "ds0", "ds1" are unrelated to this block's `args.knownDatasets`.
 bundleKey := func(name, i) {
@@ -43,20 +51,24 @@ wf.prepare(func(args) {
 
 		// addMulti: modality is unknown here, single cell answers with one column per chain.
 
-		// Gene level, not allele: HILARy splits v_call on "*" anyway.
-		for gene in ["V", "J"] {
+		// Gene level, not allele: HILARy splits v_call on "*" anyway. C is optional: isotype where
+		// the producer gives no isotype column (imported AIRR c_call).
+		for gene in ["V", "J", "C"] {
 			bundleBuilder.addMulti({
 				axes: [{ anchor: anchor, idx: 1 }],
 				name: "pl7.app/vdj/geneHit",
 				domain: { "pl7.app/vdj/reference": gene + "Gene" }
 			}, bundleKey(gene + "Gene", i))
 		}
-		// Allele inference groups by allele; import-vdj-data strips it from the gene hit.
-		bundleBuilder.addMulti({
-			axes: [{ anchor: anchor, idx: 1 }],
-			name: "pl7.app/vdj/geneHitWithAllele",
-			domain: { "pl7.app/vdj/reference": "VGene" }
-		}, bundleKey("VAllele", i))
+		// Allele inference groups by allele; import-vdj-data strips it from the gene hit. D and J
+		// alleles only label the tree's observed nodes.
+		for gene in ["V", "D", "J"] {
+			bundleBuilder.addMulti({
+				axes: [{ anchor: anchor, idx: 1 }],
+				name: "pl7.app/vdj/geneHitWithAllele",
+				domain: { "pl7.app/vdj/reference": gene + "Gene" }
+			}, bundleKey(gene + "Allele", i))
+		}
 
 		// MiXCR's CDR3 spans Cys to Trp/Phe, i.e. AIRR's junction.
 		bundleBuilder.addMulti({
@@ -94,6 +106,12 @@ wf.prepare(func(args) {
 			annotations: { "pl7.app/vdj/isMainSequence": "true" }
 		}, bundleKey("mainSeqAa", i))
 
+		// MiXCR's and Cell Ranger's isotype (IgG, IgM, ...); optional.
+		bundleBuilder.addMulti({
+			axes: [{ anchor: anchor, idx: 1 }],
+			name: "pl7.app/vdj/isotype"
+		}, bundleKey("isotype", i))
+
 		// UMIs, reads, or cells for single cell. Chain-agnostic, so a single match.
 		bundleBuilder.addSingle({
 			axes: [{ anchor: anchor, idx: 0 }, { anchor: anchor, idx: 1 }],
@@ -103,6 +121,14 @@ wf.prepare(func(args) {
 				"pl7.app/abundance/isPrimary": "true"
 			}
 		}, bundleKey("abundance", i))
+
+		// Every count the producer gives on both axes, not just the primary one.
+		for count in COUNTS {
+			bundleBuilder.addMulti({
+				axes: [{ anchor: anchor, idx: 0 }, { anchor: anchor, idx: 1 }],
+				name: count.name
+			}, bundleKey(count.header, i))
+		}
 
 		// `import-vdj-data` emits it as "VDJRegion nt".
 		bundleBuilder.addMulti({
@@ -272,6 +298,23 @@ wf.body(func(args) {
 			}
 		}
 		addChain(heavyKey, "")
+		// The producer's heavy alleles and VDJRegion, shown on observed nodes. With upstream alignments
+		// the V allele is already in as v_allele, and a column cannot be added twice.
+		for entry in [["VAllele", "v_allele_hit"], ["DAllele", "d_allele_hit"], ["JAllele", "j_allele_hit"], ["vdjRegion", "vdj_region"]] {
+			column := optionalHeavyOf(entry[0])
+			if !is_undefined(column) && !(entry[0] == "VAllele" && alignmentSource == "upstream") {
+				clonotypeTableBuilder.add(column, { header: entry[1] })
+			}
+		}
+		// Isotype is the heavy chain's; collect derives it from c_call where no isotype column came.
+		hasIsotype := false
+		for entry in [["isotype", "isotype"], ["CGene", "c_call"]] {
+			column := optionalHeavyOf(entry[0])
+			if !is_undefined(column) {
+				clonotypeTableBuilder.add(column, { header: entry[1] })
+				hasIsotype = true
+			}
+		}
 		if useLightChains {
 			addChain("B", "_light")
 		}
@@ -287,6 +330,16 @@ wf.body(func(args) {
 		abundanceTableBuilder.setAxisHeader(sampleAxisSpec.name, "sample_id")
 		abundanceTableBuilder.setAxisHeader(clonotypeAxisSpec.name, "sequence_id")
 		abundanceTableBuilder.add(abundanceColumn, { header: "abundance" })
+		// Chain-agnostic counts only; a per-chain one would count a cell once per chain.
+		counts := {}
+		for count in COUNTS {
+			for column in columns.getColumns(bundleKey(count.header, i)) {
+				if is_undefined(counts[count.header]) && is_undefined(column.spec.domain[CHAIN_DOMAIN]) {
+					abundanceTableBuilder.add(column, { header: count.header })
+					counts[count.header] = true
+				}
+			}
+		}
 
 		metadataById := {}
 		for column in columns.getColumns(bundleKey("metadata", i)) {
@@ -319,6 +372,8 @@ wf.body(func(args) {
 			isSingleCell: isSingleCell,
 			isKnown: isKnown,
 			useLightChains: useLightChains,
+			hasIsotype: hasIsotype,
+			counts: counts,
 			alignmentSource: alignmentSource,
 			clnsColumn: clnsColumn,
 			clonotypeTable: clonotypeTableBuilder.build(),
@@ -348,9 +403,15 @@ wf.body(func(args) {
 	// bulk members then join with the light half unknown.
 	useLightChains := false
 	anyKnown := false
+	anyIsotype := false
+	anyCount := {}
 	for ds in datasets {
+		for header, _ in ds.counts {
+			anyCount[header] = true
+		}
 		useLightChains = useLightChains || ds.useLightChains
 		anyKnown = anyKnown || ds.isKnown
+		anyIsotype = anyIsotype || ds.hasIsotype
 	}
 
 	// Merge prefixes ids with dataset position so datasets sharing samples or presets
@@ -638,6 +699,28 @@ wf.body(func(args) {
 			}
 		})
 	}
+	for k, count in COUNTS {
+		if !anyCount[count.header] {
+			continue
+		}
+		lineageStatsColumns = append(lineageStatsColumns, {
+			column: "total_" + count.header,
+			allowNA: true,
+			spec: {
+				name: "pl7.app/clustering/totalCount",
+				valueType: "Long",
+				domain: { "pl7.app/abundance/unit": count.unit },
+				annotations: {
+					"pl7.app/isAbundance": "true",
+					"pl7.app/abundance/unit": count.unit,
+					"pl7.app/abundance/normalized": "false",
+					"pl7.app/label": "Total " + count.label,
+					"pl7.app/description": count.label + " of every member of the lineage summed over its samples, from the datasets that count " + text.to_lower(count.label) + ". Blank if none does.",
+					"pl7.app/table/orderPriority": string(89080 - k)
+				}
+			}
+		})
+	}
 	if anyKnown {
 		lineageStatsColumns = append(lineageStatsColumns, {
 			column: "known_count",
@@ -810,6 +893,52 @@ wf.body(func(args) {
 				"NT mutations", "Base changes on the " + chain + " chain since the parent node, each written as the old base, its position within the chain, and the new base.", 94000)),
 			stepColumn("unresolved_from_parent", "pl7.app/dendrogram/unresolvedPositions", "Int", "nucleotide",
 				"unresolved positions", "Positions of the " + chain + " chain that changed since the parent but were too uncertain to call either way.", 93000))
+		// Since the germline tip and since the MRCA of the observed sequences. The germline has no
+		// junction, so changes from it are in V and J only.
+		fromColumn := func(column, name, valueType, alphabet, from, label, description, priority) {
+			c := stepColumn(column, name, valueType, alphabet, label, description, priority)
+			c.spec.domain["pl7.app/dendrogram/mutations/from"] = from
+			return c
+		}
+		for alphabet in ["nucleotide", "aminoacid"] {
+			isNt := alphabet == "nucleotide"
+			stem := isNt ? "" : "aa_"
+			short := isNt ? "NT" : "AA"
+			unit := isNt ? "bases" : "amino acids"
+			shift := isNt ? 0 : 50
+			stepColumns = append(stepColumns,
+				fromColumn(stem + "mutation_count_from_germline", "pl7.app/dendrogram/mutationCount", "Int", alphabet, "germline",
+					"#" + short + " mutations from germline", "How many " + unit + " of the " + chain + " chain differ from the germline in V and J, counting only positions settled at both ends.", 92800 + shift),
+				withFont(fromColumn(stem + "mutations_from_germline", "pl7.app/dendrogram/mutationsAcquired", "String", alphabet, "germline",
+					short + " mutations from germline", "Changes on the " + chain + " chain from the germline, each written as the germline's " + (isNt ? "base" : "residue") + ", its position within the chain, and the node's.", 92700 + shift)),
+				fromColumn(stem + "mutation_rate_from_germline", "pl7.app/dendrogram/mutationRate", "Double", alphabet, "germline",
+					short + " mutation rate from germline", "Mutations from the germline over the " + chain + " chain positions settled at both ends.", 92600 + shift),
+				fromColumn(stem + "mutation_count_from_mrca", "pl7.app/dendrogram/mutationCount", "Int", alphabet, "mrca",
+					"#" + short + " mutations from MRCA", "How many " + unit + " of the " + chain + " chain differ from the most recent common ancestor of the lineage's observed sequences. Blank on nodes above it.", 92400 + shift),
+				withFont(fromColumn(stem + "mutations_from_mrca", "pl7.app/dendrogram/mutationsAcquired", "String", alphabet, "mrca",
+					short + " mutations from MRCA", "Changes on the " + chain + " chain from the most recent common ancestor of the lineage's observed sequences. Blank on nodes above it.", 92300 + shift)))
+		}
+	}
+
+	// Heavy only, over the germline's V and J flanks; inferred nodes too.
+	identityColumns := []
+	for gene in ["V", "J"] {
+		identityColumns = append(identityColumns, {
+			column: "heavy_" + text.to_lower(gene) + "_identity",
+			allowNA: true,
+			spec: {
+				name: "pl7.app/vdj/" + text.to_lower(gene) + "IdentityPercent",
+				valueType: "Double",
+				domain: { "pl7.app/vdj/chain": "IGHeavy" },
+				annotations: {
+					"pl7.app/label": "Heavy " + gene + " identity, %",
+					"pl7.app/description": "Share of the node's heavy chain " + gene + " positions that match the germline, over positions settled at both ends.",
+					"pl7.app/min": "0",
+					"pl7.app/max": "100",
+					"pl7.app/table/orderPriority": gene == "V" ? "92200" : "92100"
+				}
+			}
+		})
 	}
 
 	sequenceColumns := []
@@ -933,7 +1062,25 @@ wf.body(func(args) {
 					"pl7.app/min": "0"
 				}
 			}
-		}] + stepColumns + sequenceColumns + [noTreeReasonColumn("96000", "hidden")]
+		}, {
+			column: "distance_from_germline",
+			allowNA: true,
+			spec: {
+				name: "pl7.app/dendrogram/distance",
+				valueType: "Double",
+				domain: {
+					"pl7.app/dendrogram/distance/from": "germline",
+					"pl7.app/dendrogram/distance/unit": distanceUnit,
+					"pl7.app/dendrogram/chainSet": chainSet
+				},
+				annotations: {
+					"pl7.app/label": "Distance from germline",
+					"pl7.app/description": "How much change the tree estimated between this node and the germline, along the branches joining them.",
+					"pl7.app/dendrogram/distance/from": "germline",
+					"pl7.app/dendrogram/isDistance": "true"
+				}
+			}
+		}] + identityColumns + stepColumns + sequenceColumns + [noTreeReasonColumn("96000", "hidden")]
 	}, { splitDataAndSpec: true }))
 
 	// Clonotype properties on tree axes (the dendrogram cannot follow a linker); the tooltip
@@ -1017,7 +1164,23 @@ wf.body(func(args) {
 			}
 			return aaSequence(column + suffix, feature, label + name, description, domain, id)
 		}
-		return [
+		alleles := []
+		if isHeavy {
+			for g in ["V", "D", "J"] {
+				alleles = append(alleles, nodeProperty(text.to_lower(g) + "_allele", {
+					name: "pl7.app/vdj/geneHitWithAllele",
+					valueType: "String",
+					domain: { "pl7.app/vdj/reference": g + "Gene" },
+					annotations: {
+						"pl7.app/label": g + " allele",
+						"pl7.app/description": g + " allele of the clonotype at this node" + (g == "V" ? ": the donor's inferred allele where allele inference reassigned it, else the producer's." : ", as the producer called it.")
+					}
+				}))
+			}
+			alleles = append(alleles, ntSequence("vdj_region", "VDJRegion", "VDJRegion nt",
+				"Observed VDJRegion nucleotide sequence of the clonotype at this node, where the producer gives one.", {}, "vdjRegionNt"))
+		}
+		return alleles + [
 			gene("v_call", "VGene", "V gene"),
 			gene("j_call", "JGene", "J gene"),
 			aa("cdr1_aa", "CDR1", "CDR1 aa", lead + "CDR1 amino acid sequence of the clonotype at this node.", undefined),
@@ -1090,22 +1253,45 @@ wf.body(func(args) {
 		}, { splitDataAndSpec: true }))
 	}
 
+	// Each count the datasets give, summed over the node's samples and clonotypes; blank on a node
+	// none of whose datasets gives it.
+	nodeCountColumns := []
+	for k, count in COUNTS {
+		if anyCount[count.header] {
+			nodeCountColumns = append(nodeCountColumns, nodeProperty(count.header, {
+				name: "pl7.app/dendrogram/nodeCount",
+				valueType: "Long",
+				domain: { "pl7.app/abundance/unit": count.unit },
+				annotations: {
+					"pl7.app/isAbundance": "true",
+					"pl7.app/abundance/unit": count.unit,
+					"pl7.app/abundance/normalized": "false",
+					"pl7.app/label": count.label,
+					"pl7.app/description": count.label + " of the node, summed over every sample and every clonotype carrying its sequence, from the datasets that count them.",
+					"pl7.app/table/orderPriority": string(86990 - k)
+				}
+			}))
+		}
+	}
+
 	// No sample axis (the dendrogram cannot follow a linker): summed over the node's samples and clonotypes.
 	nodeAbundance := traced(blockTrace, xsv.importFile(perDonor.output("nodeAbundance"), "tsv", {
 		axes: [
 			{ column: "lineage_id", spec: lineageAxisSpec },
 			{ column: "node_id", spec: nodeAxisSpec }
 		],
-		columns: [
+		columns: (sameAbundance ? [
+			// One unit across datasets; otherwise the sum would add reads to UMIs.
 			nodeProperty("abundance", {
 				name: "pl7.app/dendrogram/nodeAbundance",
 				valueType: "Double",
-				annotations: {
+				annotations: maps.merge(abundanceAnnotations, {
 					"pl7.app/label": "Abundance",
-					"pl7.app/description": "The node's abundance, summed over every sample and every clonotype carrying its sequence.",
+					"pl7.app/description": "The node's primary abundance, summed over every sample and every clonotype carrying its sequence.",
 					"pl7.app/table/orderPriority": "87000"
-				}
-			}),
+				})
+			})
+		] : []) + nodeCountColumns + [
 			nodeProperty("clonotype_count", {
 				name: "pl7.app/dendrogram/nodeClonotypeCount",
 				valueType: "Int",
@@ -1114,7 +1300,16 @@ wf.body(func(args) {
 					"pl7.app/description": "How many clonotypes carry this node's sequence. More than one means the same sequence was seen in several samples or datasets."
 				}
 			})
-		] + (datasetCount > 1 ? [nodeProperty("dataset", {
+		] + (anyIsotype ? [nodeProperty("isotype", {
+			name: "pl7.app/vdj/isotype",
+			valueType: "String",
+			annotations: {
+				"pl7.app/label": "Isotype",
+				"pl7.app/description": "The node's heavy chain isotype, from the producer's isotype, else the C gene. Clonotypes of one sequence can differ in isotype: the one with the most of a count all of them have wins (cells, then UMIs, then reads), and without such a count the node is left blank. Blank on inferred nodes.",
+				"pl7.app/isDiscreteFilter": "true",
+				"pl7.app/table/orderPriority": "86950"
+			}
+		})] : []) + (datasetCount > 1 ? [nodeProperty("dataset", {
 			name: "pl7.app/dendrogram/dataset",
 			valueType: "String",
 			annotations: {
@@ -1216,38 +1411,35 @@ wf.body(func(args) {
 				}]
 			}, { splitDataAndSpec: true })), func(key, value) { knownDistances[key] = value })
 
-			// Not exported for now: downstream tables reach the known antibody's columns through this link
-			// without saying so, and repeat the lineage columns. Back once the SDK can label every
-			// column reached through a linker and stop discovery at it.
-//			// Links a candidate to its known antibody's columns, one per dataset pair since known antibody
-//			// sets may share ids. Known antibody axis first: links run from the second group to the first.
-//			for knownDs in datasets {
-//				if !knownDs.isKnown || knownDs.index == ds.index {
-//					continue
-//				}
-//				pair := idx + "-" + string(knownDs.index)
-//				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("knownLinks-" + pair), "tsv", {
-//					axes: [
-//						{ column: "known_id", spec: knownDs.clonotypeAxisSpec },
-//						{ column: "sequence_id", spec: ds.clonotypeAxisSpec }
-//					],
-//					columns: [{
-//						column: "link",
-//						id: "knownLink." + ds.key + "." + knownDs.key,
-//						spec: {
-//							name: "pl7.app/vdj/nearestKnownAntibody",
-//							valueType: "Int",
-//							domain: { "pl7.app/clustering/blockId": blockId },
-//							annotations: {
-//								"pl7.app/isLinkerColumn": "true",
-//								"pl7.app/linkLabel": "Known antibody",
-//								"pl7.app/label": "Nearest known antibody",
-//								"pl7.app/description": "Links a clonotype to the known antibody its mutation count is measured to, so the known antibody's own columns can be read beside it."
-//							}
-//						}
-//					}]
-//				}, { splitDataAndSpec: true })), func(key, value) { knownLinks[key] = value })
-//			}
+			// Links a candidate to its known antibody's columns, one per dataset pair since known antibody
+			// sets may share ids. Known antibody axis first: links run from the second group to the first.
+			for knownDs in datasets {
+				if !knownDs.isKnown || knownDs.index == ds.index {
+					continue
+				}
+				pair := idx + "-" + string(knownDs.index)
+				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("knownLinks-" + pair), "tsv", {
+					axes: [
+						{ column: "known_id", spec: knownDs.clonotypeAxisSpec },
+						{ column: "sequence_id", spec: ds.clonotypeAxisSpec }
+					],
+					columns: [{
+						column: "link",
+						id: "knownLink." + ds.key + "." + knownDs.key,
+						spec: {
+							name: "pl7.app/vdj/nearestKnownAntibody",
+							valueType: "Int",
+							domain: { "pl7.app/clustering/blockId": blockId },
+							annotations: {
+								"pl7.app/isLinkerColumn": "true",
+								"pl7.app/linkLabel": "Known antibody",
+								"pl7.app/label": "Nearest known antibody",
+								"pl7.app/description": "Links a clonotype to the known antibody its mutation count is measured to, so the known antibody's own columns can be read beside it."
+							}
+						}
+					}]
+				}, { splitDataAndSpec: true })), func(key, value) { knownLinks[key] = value })
+			}
 		}
 
 		// Each dataset's column is labelled "Members"; the dataset trace tells them apart.
@@ -1358,6 +1550,13 @@ wf.body(func(args) {
 	maps.forEach(nodeMetadata, add(treeNodesFrameBuilder))
 	maps.forEach(nodeAbundance, add(treeNodesFrameBuilder))
 	maps.forEach(nodeClonotypeLinks, add(treeNodesFrameBuilder))
+	// The only lineage column the node tables show: constant down a lineage, but worth having
+	// beside a node when rows are read or exported on their own.
+	maps.forEach(lineageStats, func(key, value) {
+		if value.spec.name == "pl7.app/clustering/donor" {
+			treeNodesFrameBuilder.add(key, value.spec, value.data)
+		}
+	})
 	treeNodesFrame := treeNodesFrameBuilder.build()
 
 	// The lineage axis's label for other blocks, so tables reaching it through the clonotype
@@ -1393,7 +1592,7 @@ wf.body(func(args) {
 	})
 	maps.forEach(germlineMutations, add(exportsBuilder))
 	maps.forEach(knownDistances, add(exportsBuilder))
-//	maps.forEach(knownLinks, add(exportsBuilder))
+	maps.forEach(knownLinks, add(exportsBuilder))
 
 	// Each basket as a subset of each dataset it has clonotypes in, which lead selection offers as a filter.
 	// Built from args alone, so a basket edit reruns none of the stages.
