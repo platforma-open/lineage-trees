@@ -535,6 +535,24 @@ NODE_PROPERTY_SOURCE_COLUMNS = ["v_call", "j_call", "junction", "cdr1_aa", "cdr2
 KNOWN_DISTANCE_COLUMNS = ["sequence_id", "known_id", "known_aa_heavy", "known_nt_heavy",
                            "known_aa_light", "known_nt_light"]
 NODE_PROPERTY_COLUMNS = ["lineage_id", "node_id", *NODE_PROPERTY_SOURCE_COLUMNS]
+# Every count a dataset gives beside its primary abundance, by the abundance table's header.
+# Blank where no dataset of a node or lineage carries that count.
+COUNT_COLUMNS = ["reads", "umis", "cells"]
+
+
+def _count_sums(frame: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """Each count summed per key, blank where no row has it; whole numbers stay whole."""
+    counts = [c for c in COUNT_COLUMNS if c in frame.columns]
+    summed = frame.groupby(keys, as_index=False)[counts].sum(min_count=1) if counts else (
+        frame[keys].drop_duplicates())
+    for column in COUNT_COLUMNS:
+        if column not in summed.columns:
+            summed[column] = float("nan")
+        values = summed[column]
+        whole = values.dropna()
+        if (whole == whole.round(0)).all():
+            summed[column] = values.round(0).astype("Int64")
+    return summed[[*keys, *COUNT_COLUMNS]]
 
 
 
@@ -635,10 +653,15 @@ def _lineage_descriptors(
         )
         whole = described["total_abundance"].round(0)
         described["total_abundance"] = whole.astype(int) if (whole == described["total_abundance"]).all() else described["total_abundance"]
+        totals = _count_sums(present, ["lineage_id"]).set_index("lineage_id")
+        for column in COUNT_COLUMNS:
+            described[f"total_{column}"] = described["lineage_id"].map(totals[column])
     else:
         described["total_abundance"] = ""
         described["sample_count"] = ""
         described["abundance_fraction"] = ""
+        for column in COUNT_COLUMNS:
+            described[f"total_{column}"] = ""
     return described
 
 
@@ -789,15 +812,17 @@ def _node_abundance(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> p
 
     No sample axis: the dendrogram could not join it.
     """
-    columns = ["lineage_id", "node_id", "abundance", "clonotype_count", "dataset"]
+    columns = ["lineage_id", "node_id", "abundance", "clonotype_count", "dataset", *COUNT_COLUMNS]
     if present is None or links.empty:
         return pd.DataFrame(columns=columns)
+    counts = [c for c in COUNT_COLUMNS if c in present.columns]
     placed = links[["lineage_id", "node_id", "sequence_id"]].merge(
-        present[["sequence_id", "lineage_id", "abundance"]], on=["lineage_id", "sequence_id"],
+        present[["sequence_id", "lineage_id", "abundance", *counts]], on=["lineage_id", "sequence_id"],
     )
     if placed.empty:
         return pd.DataFrame(columns=columns)
-    summed = placed.groupby(["lineage_id", "node_id"], as_index=False)["abundance"].sum()
+    summed = placed.groupby(["lineage_id", "node_id"], as_index=False)["abundance"].sum().merge(
+        _count_sums(placed, ["lineage_id", "node_id"]), on=["lineage_id", "node_id"])
     # Datasets as merge named them, "A, B" when seen in both. One flag per dataset rides the
     # count's groupby; single-dataset runs skip it.
     names = []
@@ -819,7 +844,7 @@ def _node_abundance(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> p
         counted = counted.drop(columns=list(flags)).assign(dataset=mask.map(labels))
     return summed.merge(counted, on=["lineage_id", "node_id"], how="right").fillna(
         {"abundance": 0, "dataset": ""},
-    ).reindex(columns=columns, fill_value="")
+    ).reindex(columns=columns)
 
 
 def _isotypes(clonotypes: pd.DataFrame) -> pd.Series:
@@ -1004,6 +1029,10 @@ def collect(args: argparse.Namespace) -> None:
             present = abundance.merge(lineages, on="sequence_id", how="inner")
         dataset_total = float(pd.to_numeric(abundance["abundance"], errors="coerce").fillna(0).sum())
         present = present.assign(abundance=pd.to_numeric(present["abundance"], errors="coerce").fillna(0))
+        # Blank stays blank: a dataset without the count must not read as zero.
+        for column in COUNT_COLUMNS:
+            if column in present.columns:
+                present[column] = pd.to_numeric(present[column], errors="coerce")
     if args.out_node_metadata is not None:
         _node_metadata(args, present, links).to_csv(args.out_node_metadata, sep="\t", index=False)
     if args.out_node_abundance is not None:

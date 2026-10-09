@@ -26,6 +26,14 @@ hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.
 CHAIN_DOMAIN := "pl7.app/vdj/scClonotypeChain"
 CHAIN_INDEX_DOMAIN := "pl7.app/vdj/scClonotypeChain/index"
 
+// Counts summed per node and lineage beside the primary abundance: abundance table header,
+// column name, unit and its label.
+COUNTS := [
+	{ header: "reads", name: "pl7.app/vdj/readCount", unit: "reads", label: "Reads" },
+	{ header: "umis", name: "pl7.app/vdj/uniqueMoleculeCount", unit: "molecules", label: "UMIs" },
+	{ header: "cells", name: "pl7.app/vdj/uniqueCellCount", unit: "cells", label: "Cells" }
+]
+
 // Query name plus dataset position in `args.datasets` (sorted by the model).
 // Bundle anchors "ds0", "ds1" are unrelated to this block's `args.knownDatasets`.
 bundleKey := func(name, i) {
@@ -110,6 +118,14 @@ wf.prepare(func(args) {
 				"pl7.app/abundance/isPrimary": "true"
 			}
 		}, bundleKey("abundance", i))
+
+		// Every count the producer gives on both axes, not just the primary one.
+		for count in COUNTS {
+			bundleBuilder.addMulti({
+				axes: [{ anchor: anchor, idx: 0 }, { anchor: anchor, idx: 1 }],
+				name: count.name
+			}, bundleKey(count.header, i))
+		}
 
 		// `import-vdj-data` emits it as "VDJRegion nt".
 		bundleBuilder.addMulti({
@@ -303,6 +319,16 @@ wf.body(func(args) {
 		abundanceTableBuilder.setAxisHeader(sampleAxisSpec.name, "sample_id")
 		abundanceTableBuilder.setAxisHeader(clonotypeAxisSpec.name, "sequence_id")
 		abundanceTableBuilder.add(abundanceColumn, { header: "abundance" })
+		// Chain-agnostic counts only; a per-chain one would count a cell once per chain.
+		counts := {}
+		for count in COUNTS {
+			for column in columns.getColumns(bundleKey(count.header, i)) {
+				if is_undefined(counts[count.header]) && is_undefined(column.spec.domain[CHAIN_DOMAIN]) {
+					abundanceTableBuilder.add(column, { header: count.header })
+					counts[count.header] = true
+				}
+			}
+		}
 
 		metadataById := {}
 		for column in columns.getColumns(bundleKey("metadata", i)) {
@@ -336,6 +362,7 @@ wf.body(func(args) {
 			isKnown: isKnown,
 			useLightChains: useLightChains,
 			hasIsotype: hasIsotype,
+			counts: counts,
 			alignmentSource: alignmentSource,
 			clnsColumn: clnsColumn,
 			clonotypeTable: clonotypeTableBuilder.build(),
@@ -366,7 +393,11 @@ wf.body(func(args) {
 	useLightChains := false
 	anyKnown := false
 	anyIsotype := false
+	anyCount := {}
 	for ds in datasets {
+		for header, _ in ds.counts {
+			anyCount[header] = true
+		}
 		useLightChains = useLightChains || ds.useLightChains
 		anyKnown = anyKnown || ds.isKnown
 		anyIsotype = anyIsotype || ds.hasIsotype
@@ -654,6 +685,28 @@ wf.body(func(args) {
 					"pl7.app/format": ".2p",
 					"pl7.app/table/orderPriority": "89050"
 				})
+			}
+		})
+	}
+	for k, count in COUNTS {
+		if !anyCount[count.header] {
+			continue
+		}
+		lineageStatsColumns = append(lineageStatsColumns, {
+			column: "total_" + count.header,
+			allowNA: true,
+			spec: {
+				name: "pl7.app/clustering/totalCount",
+				valueType: "Long",
+				domain: { "pl7.app/abundance/unit": count.unit },
+				annotations: {
+					"pl7.app/isAbundance": "true",
+					"pl7.app/abundance/unit": count.unit,
+					"pl7.app/abundance/normalized": "false",
+					"pl7.app/label": "Total " + count.label,
+					"pl7.app/description": count.label + " of every member of the lineage summed over its samples, from the datasets that count " + text.to_lower(count.label) + ". Blank if none does.",
+					"pl7.app/table/orderPriority": string(89080 - k)
+				}
 			}
 		})
 	}
@@ -1173,22 +1226,45 @@ wf.body(func(args) {
 		}, { splitDataAndSpec: true }))
 	}
 
+	// Each count the datasets give, summed over the node's samples and clonotypes; blank on a node
+	// none of whose datasets gives it.
+	nodeCountColumns := []
+	for k, count in COUNTS {
+		if anyCount[count.header] {
+			nodeCountColumns = append(nodeCountColumns, nodeProperty(count.header, {
+				name: "pl7.app/dendrogram/nodeCount",
+				valueType: "Long",
+				domain: { "pl7.app/abundance/unit": count.unit },
+				annotations: {
+					"pl7.app/isAbundance": "true",
+					"pl7.app/abundance/unit": count.unit,
+					"pl7.app/abundance/normalized": "false",
+					"pl7.app/label": count.label,
+					"pl7.app/description": count.label + " of the node, summed over every sample and every clonotype carrying its sequence, from the datasets that count them.",
+					"pl7.app/table/orderPriority": string(86990 - k)
+				}
+			}))
+		}
+	}
+
 	// No sample axis (the dendrogram cannot follow a linker): summed over the node's samples and clonotypes.
 	nodeAbundance := traced(blockTrace, xsv.importFile(perDonor.output("nodeAbundance"), "tsv", {
 		axes: [
 			{ column: "lineage_id", spec: lineageAxisSpec },
 			{ column: "node_id", spec: nodeAxisSpec }
 		],
-		columns: [
+		columns: (sameAbundance ? [
+			// One unit across datasets; otherwise the sum would add reads to UMIs.
 			nodeProperty("abundance", {
 				name: "pl7.app/dendrogram/nodeAbundance",
 				valueType: "Double",
-				annotations: {
+				annotations: maps.merge(abundanceAnnotations, {
 					"pl7.app/label": "Abundance",
-					"pl7.app/description": "The node's abundance, summed over every sample and every clonotype carrying its sequence.",
+					"pl7.app/description": "The node's primary abundance, summed over every sample and every clonotype carrying its sequence.",
 					"pl7.app/table/orderPriority": "87000"
-				}
-			}),
+				})
+			})
+		] : []) + nodeCountColumns + [
 			nodeProperty("clonotype_count", {
 				name: "pl7.app/dendrogram/nodeClonotypeCount",
 				valueType: "Int",

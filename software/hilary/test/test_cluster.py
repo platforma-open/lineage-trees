@@ -76,7 +76,7 @@ def main(tmp: Path) -> None:
         clono("zero", "IGHV1-2*02", "IGHJ4*02", BASE),
     ])
     ab0 = write(tmp / "ab0.tsv", [
-        {"sample_id": s, "sequence_id": k, "abundance": n} for s, k, n in [
+        {"sample_id": s, "sequence_id": k, "abundance": n, "reads": 10 * n, "umis": n} for s, k, n in [
             ("s1", "xigh", 50), ("s1", "g-ig", 30), ("s1", "paired", 10), ("s1", "vdiff", 5),
             ("s1", "jdiff", 5), ("s1", "far", 5), ("s1", "both", 20), ("s1", "zero", 0),
             ("s2", "both", 7)]])
@@ -85,8 +85,9 @@ def main(tmp: Path) -> None:
         clono("c1", "IGHV3S61", "IGHJ4", mutate(OTHER, 12), c_call="IGHA1*01"),
         clono("c2", "IGHV3S61", "IGHJ4", OTHER + "GGG", c_call="IGKC*01"),
     ])
-    ab1 = write(tmp / "ab1.tsv", [{"sample_id": "t1", "sequence_id": "c1", "abundance": 3},
-                                  {"sample_id": "t1", "sequence_id": "c2", "abundance": 1}])
+    # Reads only: its nodes' UMI count is blank, not zero.
+    ab1 = write(tmp / "ab1.tsv", [{"sample_id": "t1", "sequence_id": "c1", "abundance": 3, "reads": 30},
+                                  {"sample_id": "t1", "sequence_id": "c2", "abundance": 1, "reads": 10}])
     donors_tsv = write(tmp / "donors.tsv", [{"sample_id": "0_s1", "donor": "A"},
                                             {"sample_id": "0_s2", "donor": "B"},
                                             {"sample_id": "1_t1", "donor": "B"}])
@@ -364,6 +365,16 @@ def main(tmp: Path) -> None:
     ok("member nodes carry the producer's isotype, or the class of a heavy C gene",
        iso.get("xigh") == "IgG" and iso.get("g-ig") == "IgM" and iso.get("c1") == "IgA"
        and iso.get("c2") == "" and iso.get("vdiff") == "")
+    # Counts per node and lineage: summed per unit, blank where no dataset gives the unit.
+    counts = node_iso.merge(node_of, on=["lineage_id", "node_id"]).set_index("label")
+    ok("node counts sum each unit; a unit the node's dataset lacks is blank, not zero",
+       counts.loc["xigh", ["reads", "umis", "cells"]].tolist() == ["500", "50", ""]
+       and counts.loc["c1", ["reads", "umis"]].tolist() == ["30", ""])
+    stats = read(tmp / "lineage-stats.tsv").set_index("lineage_id")
+    lineage_a = a["0_xigh"]
+    ok("lineage totals sum each unit over members and samples",
+       stats.loc[lineage_a, ["total_reads", "total_umis", "total_cells"]].tolist() == ["900", "90", ""]
+       and stats.loc[b["1_c1"], "total_umis"] == "7")
     links = pd.DataFrame({"lineage_id": ["L1"] * 4, "node_id": ["1", "1", "2", "2"],
                           "sequence_id": ["m", "g", "t1", "t2"]})
     calls = pd.DataFrame({"sequence_id": ["m", "g", "t1", "t2"], "isotype": ["IgM", "", "IgG", "IgA"],
