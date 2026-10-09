@@ -9,9 +9,11 @@
 
 Add isotypes, mutations from the germline and the MRCA, and reads, UMIs and cells to the trees.
 
-Each observed node carries an isotype: the one holding most of its abundance, from the
-producer's isotype column or, for imported AIRR data, the class of its heavy C gene. The tree
-tooltip shows it when a run has isotypes.
+Each observed node carries an isotype, from the producer's isotype column or, for imported AIRR
+data, the class of its heavy C gene. Where the node's clonotypes differ in isotype, the one with
+the most cells, UMIs or reads wins, in the first of those every clonotype has; with none shared,
+the node is left blank rather than comparing counts in different units. The tree tooltip shows
+it when a run has isotypes.
 
 Every node also gets its changes since the germline and since the most recent common ancestor
 of the lineage's observed sequences, per chain, in nucleotides and amino acids: the list, the

@@ -1278,7 +1278,7 @@ wf.body(func(args) {
 			valueType: "String",
 			annotations: {
 				"pl7.app/label": "Isotype",
-				"pl7.app/description": "The heavy chain isotype carrying most of the node's abundance; clonotypes of one sequence can differ in isotype. From the producer's isotype, else the C gene. Blank on inferred nodes.",
+				"pl7.app/description": "The node's heavy chain isotype, from the producer's isotype, else the C gene. Clonotypes of one sequence can differ in isotype: the one with the most of a count all of them have wins (cells, then UMIs, then reads), and without such a count the node is left blank. Blank on inferred nodes.",
 				"pl7.app/isDiscreteFilter": "true",
 				"pl7.app/table/orderPriority": "86950"
 			}

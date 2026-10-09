@@ -379,11 +379,23 @@ def main(tmp: Path) -> None:
                           "sequence_id": ["m", "g", "t1", "t2"]})
     calls = pd.DataFrame({"sequence_id": ["m", "g", "t1", "t2"], "isotype": ["IgM", "", "IgG", "IgA"],
                           "c_call": ["", "IGHG3*01", "", ""]})
+    nan = float("nan")
     weights = pd.DataFrame({"sequence_id": ["m", "g", "t1", "t2"], "lineage_id": ["L1"] * 4,
-                            "abundance": [2.0, 5.0, 4.0, 4.0]})
+                            "abundance": [2.0, 5.0, 4.0, 4.0], "reads": [2.0, 5.0, 4.0, 4.0]})
     top = cluster._node_isotype(weights, links, calls).set_index("node_id")["isotype"]
-    ok("a node shared by two isotypes takes the one with more abundance, ties alphabetical",
+    ok("a node shared by two isotypes takes the one with more of a shared count, ties alphabetical",
        top.to_dict() == {"1": "IgG", "2": "IgA"})
+    # Cells before reads; reads in one dataset and cells in another cannot be compared.
+    mixed = weights.assign(reads=[9.0, 1.0, 4.0, nan], cells=[1.0, 3.0, nan, 9.0])
+    top = cluster._node_isotype(mixed, links, calls).set_index("node_id")["isotype"]
+    ok("isotypes are weighed in a count every clonotype of the node has, cells first",
+       top.get("1") == "IgG")
+    ok("with no count shared by its clonotypes, a node of two isotypes is left blank",
+       "2" not in top.index)
+    one = calls.assign(isotype=["IgM", "", "IgG", "IgG"])
+    top = cluster._node_isotype(mixed, links, one).set_index("node_id")["isotype"]
+    ok("one isotype among a node's clonotypes needs no shared count",
+       top.get("2") == "IgG")
     ok("without abundance each clonotype weighs one",
        cluster._node_isotype(None, links.iloc[:1], calls).iloc[0]["isotype"] == "IgM")
 

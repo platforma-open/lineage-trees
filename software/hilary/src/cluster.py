@@ -857,29 +857,49 @@ def _isotypes(clonotypes: pd.DataFrame) -> pd.Series:
     return pd.Series(given.to_numpy(), index=clonotypes["sequence_id"].astype(str))
 
 
-def _node_isotype(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> pd.DataFrame:
-    """The isotype holding most of each observed node's abundance, ties alphabetical.
+# Counts an isotype vote is weighed in, most deduplicated first.
+ISOTYPE_WEIGHTS = ["cells", "umis", "reads"]
 
-    A node is one sequence, and clonotypes split by C gene share it. Without abundance each
-    clonotype weighs one. Nodes without any isotype are left out.
+
+def _node_isotype(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> pd.DataFrame:
+    """Each observed node's isotype, ties alphabetical.
+
+    A node is one sequence, and clonotypes split by C gene share it. One isotype among them
+    wins outright. Otherwise the isotypes are weighed in the first count every clonotype of the
+    node has (datasets count in different units, which cannot be compared); with none, the node
+    is left blank. Without abundance each clonotype weighs one. Nodes without any isotype are
+    left out.
     """
     columns = ["lineage_id", "node_id", "isotype"]
     isotype = _isotypes(clonotypes.drop_duplicates("sequence_id"))
-    placed = links[["lineage_id", "node_id", "sequence_id"]].drop_duplicates()
+    node = ["lineage_id", "node_id"]
+    placed = links[[*node, "sequence_id"]].drop_duplicates()
     placed = placed.assign(isotype=placed["sequence_id"].map(isotype).fillna(""))
-    placed = placed[placed["isotype"] != ""]
+    placed = placed[placed["isotype"] != ""].reset_index(drop=True)
     if placed.empty:
         return pd.DataFrame(columns=columns)
-    if present is not None and not present.empty:
-        weight = present.groupby(["lineage_id", "sequence_id"])["abundance"].sum()
-        keys = pd.MultiIndex.from_arrays([placed["lineage_id"], placed["sequence_id"]])
-        placed["weight"] = weight.reindex(keys).fillna(0).to_numpy()
-    else:
+    single = placed.groupby(node)["isotype"].transform("nunique") == 1
+    if present is None or present.empty:
         placed["weight"] = 1.0
-    summed = placed.groupby(["lineage_id", "node_id", "isotype"], as_index=False)["weight"].sum()
-    summed = summed.sort_values(["lineage_id", "node_id", "weight", "isotype"],
+    else:
+        units = [u for u in ISOTYPE_WEIGHTS if u in present.columns]
+        placed["weight"] = float("nan")
+        if units:
+            per = present.groupby(["lineage_id", "sequence_id"])[units].sum(min_count=1)
+            keys = pd.MultiIndex.from_arrays([placed["lineage_id"], placed["sequence_id"]])
+            values = per.reindex(keys).reset_index(drop=True)
+            open_ = placed["weight"].isna()
+            for unit in units:
+                shared = values[unit].notna().groupby([placed["lineage_id"], placed["node_id"]]).transform("all")
+                take = open_ & shared
+                placed.loc[take, "weight"] = values.loc[take, unit]
+                open_ &= ~shared
+        placed.loc[single, "weight"] = placed.loc[single, "weight"].fillna(1.0)
+    placed = placed[placed["weight"].notna()]
+    summed = placed.groupby([*node, "isotype"], as_index=False)["weight"].sum()
+    summed = summed.sort_values([*node, "weight", "isotype"],
                                 ascending=[True, True, False, True], kind="stable")
-    return summed.drop_duplicates(["lineage_id", "node_id"])[columns]
+    return summed.drop_duplicates(node)[columns]
 
 
 def _node_metadata(args: argparse.Namespace, present, links: pd.DataFrame) -> pd.DataFrame:
