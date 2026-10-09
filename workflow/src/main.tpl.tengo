@@ -298,10 +298,11 @@ wf.body(func(args) {
 			}
 		}
 		addChain(heavyKey, "")
-		// The producer's heavy alleles and VDJRegion, shown on observed nodes.
+		// The producer's heavy alleles and VDJRegion, shown on observed nodes. With upstream alignments
+		// the V allele is already in as v_allele, and a column cannot be added twice.
 		for entry in [["VAllele", "v_allele_hit"], ["DAllele", "d_allele_hit"], ["JAllele", "j_allele_hit"], ["vdjRegion", "vdj_region"]] {
 			column := optionalHeavyOf(entry[0])
-			if !is_undefined(column) {
+			if !is_undefined(column) && !(entry[0] == "VAllele" && alignmentSource == "upstream") {
 				clonotypeTableBuilder.add(column, { header: entry[1] })
 			}
 		}

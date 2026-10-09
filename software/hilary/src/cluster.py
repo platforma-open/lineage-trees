@@ -673,7 +673,9 @@ def _with_alleles(clonotypes: pd.DataFrame) -> pd.DataFrame:
     blank = pd.Series("", index=out.index)
     hit = lambda column: out[column].fillna("").astype(str) if column in out.columns else blank
     call = hit("v_call")
-    out["v_allele"] = call.where(call.str.contains("*", regex=False), hit("v_allele_hit"))
+    # With upstream alignments the producer's V allele came in as v_allele, not v_allele_hit.
+    producer = hit("v_allele_hit").where(hit("v_allele_hit") != "", hit("v_allele"))
+    out["v_allele"] = call.where(call.str.contains("*", regex=False), producer)
     out["d_allele"] = hit("d_allele_hit")
     out["j_allele"] = hit("j_allele_hit")
     return out

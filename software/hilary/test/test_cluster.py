@@ -337,6 +337,10 @@ def main(tmp: Path) -> None:
     ok("node V allele is the inferred one where v_call carries it, else the producer's; D and J the producer's",
        shown["v_allele"].tolist() == ["IGHV1-2*04", "IGHV3-23*01"]
        and shown["d_allele"].tolist() == ["IGHD3-10*01", ""] and shown["j_allele"].tolist() == ["IGHJ4*02", "IGHJ6*01"])
+    upstream = cluster._with_alleles(pd.DataFrame({
+        "sequence_id": ["c"], "v_call": ["IGHV3-23"], "v_allele": ["IGHV3-23*04"]}))
+    ok("with upstream alignments the producer's V allele comes from v_allele",
+       upstream["v_allele"].tolist() == ["IGHV3-23*04"])
     props_out = read(props / "properties.tsv")
     ok("node properties always carry the allele and VDJRegion columns",
        {"v_allele", "d_allele", "j_allele", "vdj_region"} <= set(props_out.columns))
