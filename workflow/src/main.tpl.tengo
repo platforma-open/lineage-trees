@@ -43,8 +43,9 @@ wf.prepare(func(args) {
 
 		// addMulti: modality is unknown here, single cell answers with one column per chain.
 
-		// Gene level, not allele: HILARy splits v_call on "*" anyway.
-		for gene in ["V", "J"] {
+		// Gene level, not allele: HILARy splits v_call on "*" anyway. C is optional: isotype where
+		// the producer gives no isotype column (imported AIRR c_call).
+		for gene in ["V", "J", "C"] {
 			bundleBuilder.addMulti({
 				axes: [{ anchor: anchor, idx: 1 }],
 				name: "pl7.app/vdj/geneHit",
@@ -93,6 +94,12 @@ wf.prepare(func(args) {
 			domain: { "pl7.app/alphabet": "aminoacid" },
 			annotations: { "pl7.app/vdj/isMainSequence": "true" }
 		}, bundleKey("mainSeqAa", i))
+
+		// MiXCR's and Cell Ranger's isotype (IgG, IgM, ...); optional.
+		bundleBuilder.addMulti({
+			axes: [{ anchor: anchor, idx: 1 }],
+			name: "pl7.app/vdj/isotype"
+		}, bundleKey("isotype", i))
 
 		// UMIs, reads, or cells for single cell. Chain-agnostic, so a single match.
 		bundleBuilder.addSingle({
@@ -272,6 +279,15 @@ wf.body(func(args) {
 			}
 		}
 		addChain(heavyKey, "")
+		// Isotype is the heavy chain's; collect derives it from c_call where no isotype column came.
+		hasIsotype := false
+		for entry in [["isotype", "isotype"], ["CGene", "c_call"]] {
+			column := optionalHeavyOf(entry[0])
+			if !is_undefined(column) {
+				clonotypeTableBuilder.add(column, { header: entry[1] })
+				hasIsotype = true
+			}
+		}
 		if useLightChains {
 			addChain("B", "_light")
 		}
@@ -319,6 +335,7 @@ wf.body(func(args) {
 			isSingleCell: isSingleCell,
 			isKnown: isKnown,
 			useLightChains: useLightChains,
+			hasIsotype: hasIsotype,
 			alignmentSource: alignmentSource,
 			clnsColumn: clnsColumn,
 			clonotypeTable: clonotypeTableBuilder.build(),
@@ -348,9 +365,11 @@ wf.body(func(args) {
 	// bulk members then join with the light half unknown.
 	useLightChains := false
 	anyKnown := false
+	anyIsotype := false
 	for ds in datasets {
 		useLightChains = useLightChains || ds.useLightChains
 		anyKnown = anyKnown || ds.isKnown
+		anyIsotype = anyIsotype || ds.hasIsotype
 	}
 
 	// Merge prefixes ids with dataset position so datasets sharing samples or presets
@@ -1114,7 +1133,16 @@ wf.body(func(args) {
 					"pl7.app/description": "How many clonotypes carry this node's sequence. More than one means the same sequence was seen in several samples or datasets."
 				}
 			})
-		] + (datasetCount > 1 ? [nodeProperty("dataset", {
+		] + (anyIsotype ? [nodeProperty("isotype", {
+			name: "pl7.app/vdj/isotype",
+			valueType: "String",
+			annotations: {
+				"pl7.app/label": "Isotype",
+				"pl7.app/description": "The heavy chain isotype carrying most of the node's abundance; clonotypes of one sequence can differ in isotype. From the producer's isotype, else the C gene. Blank on inferred nodes.",
+				"pl7.app/isDiscreteFilter": "true",
+				"pl7.app/table/orderPriority": "86950"
+			}
+		})] : []) + (datasetCount > 1 ? [nodeProperty("dataset", {
 			name: "pl7.app/dendrogram/dataset",
 			valueType: "String",
 			annotations: {

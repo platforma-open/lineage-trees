@@ -816,6 +816,41 @@ def _node_abundance(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> p
     ).reindex(columns=columns, fill_value="")
 
 
+def _isotypes(clonotypes: pd.DataFrame) -> pd.Series:
+    """Each clonotype's isotype by id: the producer's, else its heavy C gene's class (IGHG3 is IgG)."""
+    given = (clonotypes["isotype"].fillna("").astype(str) if "isotype" in clonotypes.columns
+             else pd.Series("", index=clonotypes.index))
+    if "c_call" in clonotypes.columns:
+        cls = clonotypes["c_call"].fillna("").astype(str).str.extract(r"^IGH([ADEGM])", expand=False)
+        given = given.where(given != "", ("Ig" + cls).fillna(""))
+    return pd.Series(given.to_numpy(), index=clonotypes["sequence_id"].astype(str))
+
+
+def _node_isotype(present, links: pd.DataFrame, clonotypes: pd.DataFrame) -> pd.DataFrame:
+    """The isotype holding most of each observed node's abundance, ties alphabetical.
+
+    A node is one sequence, and clonotypes split by C gene share it. Without abundance each
+    clonotype weighs one. Nodes without any isotype are left out.
+    """
+    columns = ["lineage_id", "node_id", "isotype"]
+    isotype = _isotypes(clonotypes.drop_duplicates("sequence_id"))
+    placed = links[["lineage_id", "node_id", "sequence_id"]].drop_duplicates()
+    placed = placed.assign(isotype=placed["sequence_id"].map(isotype).fillna(""))
+    placed = placed[placed["isotype"] != ""]
+    if placed.empty:
+        return pd.DataFrame(columns=columns)
+    if present is not None and not present.empty:
+        weight = present.groupby(["lineage_id", "sequence_id"])["abundance"].sum()
+        keys = pd.MultiIndex.from_arrays([placed["lineage_id"], placed["sequence_id"]])
+        placed["weight"] = weight.reindex(keys).fillna(0).to_numpy()
+    else:
+        placed["weight"] = 1.0
+    summed = placed.groupby(["lineage_id", "node_id", "isotype"], as_index=False)["weight"].sum()
+    summed = summed.sort_values(["lineage_id", "node_id", "weight", "isotype"],
+                                ascending=[True, True, False, True], kind="stable")
+    return summed.drop_duplicates(["lineage_id", "node_id"])[columns]
+
+
 def _node_metadata(args: argparse.Namespace, present, links: pd.DataFrame) -> pd.DataFrame:
     """Each node's distinct metadata values joined with ", ", plus a <column>__count of them."""
     parts = []
@@ -966,7 +1001,9 @@ def collect(args: argparse.Namespace) -> None:
     if args.out_node_metadata is not None:
         _node_metadata(args, present, links).to_csv(args.out_node_metadata, sep="\t", index=False)
     if args.out_node_abundance is not None:
-        _node_abundance(present, links, clonotypes).to_csv(args.out_node_abundance, sep="\t", index=False)
+        abundance = _node_abundance(present, links, clonotypes).merge(
+            _node_isotype(present, links, clonotypes), on=["lineage_id", "node_id"], how="left")
+        abundance.fillna({"isotype": ""}).to_csv(args.out_node_abundance, sep="\t", index=False)
     step("Describing lineages")
     described = _lineage_descriptors(lineages, clonotypes, present, dataset_total)
     lineage_stats = lineage_stats.merge(described, on="lineage_id", how="left")

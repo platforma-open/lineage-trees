@@ -949,6 +949,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       hasDatasetProperty: nodeScoped.some(
         (column) => column.spec.name === "pl7.app/dendrogram/dataset",
       ),
+      // Emitted when a dataset carries an isotype or a C gene; shown in the tree's tooltip.
+      hasIsotypeProperty: nodeScoped.some((column) => column.spec.name === "pl7.app/vdj/isotype"),
       // Only runs with light chains emit the light reconstructed sequence.
       hasLightSequence: lightSequence !== undefined,
       // What a basket copies from a node when it is added.

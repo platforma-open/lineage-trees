@@ -65,8 +65,8 @@ def clono(key, v, j, junction, **extra):
 def main(tmp: Path) -> None:
     # Dataset 0: s1 (donor A), s2 (donor B). Keys ending in "g" or "h" test HILARy's id strip.
     ds0 = write(tmp / "ds0.tsv", [
-        clono("xigh", "IGHV1-2*02", "IGHJ4*02", BASE),
-        clono("g-ig", "IGHV1-2*01", "IGHJ4*02", mutate(BASE, 10, 20)),
+        clono("xigh", "IGHV1-2*02", "IGHJ4*02", BASE, isotype="IgG"),
+        clono("g-ig", "IGHV1-2*01", "IGHJ4*02", mutate(BASE, 10, 20), isotype="IgM"),
         clono("paired", "IGHV1-2*02", "IGHJ4*02", mutate(BASE, 30),
               v_call_light="IGKV1-5*01", j_call_light="IGKJ1*01", junction_light="TGTCAGCAGTGG"),
         clono("vdiff", "IGHV3-23*01", "IGHJ4*02", BASE),
@@ -82,8 +82,8 @@ def main(tmp: Path) -> None:
             ("s2", "both", 7)]])
     # Dataset 1: t1 (donor B). Gene names without an allele, which HILARy's split cannot take.
     ds1 = write(tmp / "ds1.tsv", [
-        clono("c1", "IGHV3S61", "IGHJ4", mutate(OTHER, 12)),
-        clono("c2", "IGHV3S61", "IGHJ4", OTHER + "GGG"),
+        clono("c1", "IGHV3S61", "IGHJ4", mutate(OTHER, 12), c_call="IGHA1*01"),
+        clono("c2", "IGHV3S61", "IGHJ4", OTHER + "GGG", c_call="IGKC*01"),
     ])
     ab1 = write(tmp / "ab1.tsv", [{"sample_id": "t1", "sequence_id": "c1", "abundance": 3},
                                   {"sample_id": "t1", "sequence_id": "c2", "abundance": 1}])
@@ -121,7 +121,8 @@ def main(tmp: Path) -> None:
           "--donors", donors_tsv, "--clonotypes", merged, *donor_args,
           "--dataset", "0", "--dataset", "1", "--per-dataset-dir", out,
           "--out-nodes", tmp / "nodes.tsv", "--out-lineage-stats", tmp / "lineage-stats.tsv",
-          "--out-donor-stats", tmp / "donor-stats.json")
+          "--out-donor-stats", tmp / "donor-stats.json",
+          "--out-node-abundance", tmp / "node-abundance.tsv")
 
     print("== split ==")
     split = [set(read(tmp / "split" / f"donor-{i}.tsv")["sequence_id"]) for i in range(3)]
@@ -355,6 +356,25 @@ def main(tmp: Path) -> None:
        got.loc["1", "dataset"] == "imported, mixcr" and got.loc["2", "dataset"] == "mixcr")
     ok("and its clonotype count and abundance are unchanged",
        got.loc["1", "clonotype_count"] == 2 and got.loc["1", "abundance"] == 5.0)
+
+    # Isotype per node: the producer's, else the heavy C gene's class; light C genes give none.
+    node_iso = read(tmp / "node-abundance.tsv")
+    node_of = read(tmp / "nodes.tsv")[["lineage_id", "node_id", "label"]]
+    iso = node_iso.merge(node_of, on=["lineage_id", "node_id"]).set_index("label")["isotype"].to_dict()
+    ok("member nodes carry the producer's isotype, or the class of a heavy C gene",
+       iso.get("xigh") == "IgG" and iso.get("g-ig") == "IgM" and iso.get("c1") == "IgA"
+       and iso.get("c2") == "" and iso.get("vdiff") == "")
+    links = pd.DataFrame({"lineage_id": ["L1"] * 4, "node_id": ["1", "1", "2", "2"],
+                          "sequence_id": ["m", "g", "t1", "t2"]})
+    calls = pd.DataFrame({"sequence_id": ["m", "g", "t1", "t2"], "isotype": ["IgM", "", "IgG", "IgA"],
+                          "c_call": ["", "IGHG3*01", "", ""]})
+    weights = pd.DataFrame({"sequence_id": ["m", "g", "t1", "t2"], "lineage_id": ["L1"] * 4,
+                            "abundance": [2.0, 5.0, 4.0, 4.0]})
+    top = cluster._node_isotype(weights, links, calls).set_index("node_id")["isotype"]
+    ok("a node shared by two isotypes takes the one with more abundance, ties alphabetical",
+       top.to_dict() == {"1": "IgG", "2": "IgA"})
+    ok("without abundance each clonotype weighs one",
+       cluster._node_isotype(None, links.iloc[:1], calls).iloc[0]["isotype"] == "IgM")
 
     # HILARy's pool pickles the seeded simulation by name; a worker must find the seeded one,
     # or every worker dies unpickling and the pool respawns them forever.
