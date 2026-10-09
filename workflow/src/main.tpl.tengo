@@ -1411,38 +1411,35 @@ wf.body(func(args) {
 				}]
 			}, { splitDataAndSpec: true })), func(key, value) { knownDistances[key] = value })
 
-			// Not exported for now: downstream tables reach the known antibody's columns through this link
-			// without saying so, and repeat the lineage columns. Back once the SDK can label every
-			// column reached through a linker and stop discovery at it.
-//			// Links a candidate to its known antibody's columns, one per dataset pair since known antibody
-//			// sets may share ids. Known antibody axis first: links run from the second group to the first.
-//			for knownDs in datasets {
-//				if !knownDs.isKnown || knownDs.index == ds.index {
-//					continue
-//				}
-//				pair := idx + "-" + string(knownDs.index)
-//				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("knownLinks-" + pair), "tsv", {
-//					axes: [
-//						{ column: "known_id", spec: knownDs.clonotypeAxisSpec },
-//						{ column: "sequence_id", spec: ds.clonotypeAxisSpec }
-//					],
-//					columns: [{
-//						column: "link",
-//						id: "knownLink." + ds.key + "." + knownDs.key,
-//						spec: {
-//							name: "pl7.app/vdj/nearestKnownAntibody",
-//							valueType: "Int",
-//							domain: { "pl7.app/clustering/blockId": blockId },
-//							annotations: {
-//								"pl7.app/isLinkerColumn": "true",
-//								"pl7.app/linkLabel": "Known antibody",
-//								"pl7.app/label": "Nearest known antibody",
-//								"pl7.app/description": "Links a clonotype to the known antibody its mutation count is measured to, so the known antibody's own columns can be read beside it."
-//							}
-//						}
-//					}]
-//				}, { splitDataAndSpec: true })), func(key, value) { knownLinks[key] = value })
-//			}
+			// Links a candidate to its known antibody's columns, one per dataset pair since known antibody
+			// sets may share ids. Known antibody axis first: links run from the second group to the first.
+			for knownDs in datasets {
+				if !knownDs.isKnown || knownDs.index == ds.index {
+					continue
+				}
+				pair := idx + "-" + string(knownDs.index)
+				maps.forEach(traced(dsTrace, xsv.importFile(perDonor.output("knownLinks-" + pair), "tsv", {
+					axes: [
+						{ column: "known_id", spec: knownDs.clonotypeAxisSpec },
+						{ column: "sequence_id", spec: ds.clonotypeAxisSpec }
+					],
+					columns: [{
+						column: "link",
+						id: "knownLink." + ds.key + "." + knownDs.key,
+						spec: {
+							name: "pl7.app/vdj/nearestKnownAntibody",
+							valueType: "Int",
+							domain: { "pl7.app/clustering/blockId": blockId },
+							annotations: {
+								"pl7.app/isLinkerColumn": "true",
+								"pl7.app/linkLabel": "Known antibody",
+								"pl7.app/label": "Nearest known antibody",
+								"pl7.app/description": "Links a clonotype to the known antibody its mutation count is measured to, so the known antibody's own columns can be read beside it."
+							}
+						}
+					}]
+				}, { splitDataAndSpec: true })), func(key, value) { knownLinks[key] = value })
+			}
 		}
 
 		// Each dataset's column is labelled "Members"; the dataset trace tells them apart.
@@ -1595,7 +1592,7 @@ wf.body(func(args) {
 	})
 	maps.forEach(germlineMutations, add(exportsBuilder))
 	maps.forEach(knownDistances, add(exportsBuilder))
-//	maps.forEach(knownLinks, add(exportsBuilder))
+	maps.forEach(knownLinks, add(exportsBuilder))
 
 	// Each basket as a subset of each dataset it has clonotypes in, which lead selection offers as a filter.
 	// Built from args alone, so a basket edit reruns none of the stages.
