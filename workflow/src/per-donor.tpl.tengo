@@ -193,9 +193,15 @@ self.body(func(inputs) {
 			airrCmd := exec.builder().
 				software(mixcrSw).
 				secret("MI_LICENSE", "MI_LICENSE").
-				mem("4GiB").
-				cpu(1).
-				addFile("input.clns", entry.file).
+				// Loads the whole clns into memory, so the request grows with its size.
+				resources({
+					onCPU: {
+						cpu: 1,
+						ram: f.gib(8).plus(f.size("clns").times(30)).
+							between(f.gib(8), f.gib(256)).staticFallback(f.gib(16))
+					}
+				}).
+				addFile("input.clns", entry.file, { tag: "clns" }).
 				arg("exportAirr").
 				arg("input.clns").arg("airr.tsv").
 				saveFile("airr.tsv").
