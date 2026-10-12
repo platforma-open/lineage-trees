@@ -1,5 +1,11 @@
 # @platforma-open/milaboratories.lineage-trees.block
 
+## 1.2.1
+
+### Patch Changes
+
+- a6e8755: Fix exportAirr running out of memory on large samples. Memory now grows with the clns size, from 8 GiB.
+
 ## 1.2.0
 
 ### Minor Changes
