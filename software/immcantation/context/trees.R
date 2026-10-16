@@ -1208,8 +1208,14 @@ attempt_build <- function(build, p, on, nproc) {
   tryCatch(
     if (build == "igphyml") {
       # Also buildIgphyml's default; named to show the shared threshold.
-      getTrees(on, build = "igphyml", check_divergence = FALSE, exec = igphyml, nproc = nproc, quiet = 1,
-               partition = p, asrc = ASR_CREDIBLE_MASS, rseed = TREE_SEED)
+      # buildIgphyml warns about split codons on every call, whatever the data. Ours keep their
+      # bases at germline positions, which IgPhyML reads as a partly known codon, so it is dropped.
+      withCallingHandlers(
+        getTrees(on, build = "igphyml", check_divergence = FALSE, exec = igphyml, nproc = nproc, quiet = 1,
+                 partition = p, asrc = ASR_CREDIBLE_MASS, rseed = TREE_SEED),
+        warning = function(w) {
+          if (grepl("split codons", conditionMessage(w), fixed = TRUE)) invokeRestart("muffleWarning")
+        })
     } else if (build == "raxml") {
       # Dowser deletes RAxML's working files, which hold the marginals, so use our own dir.
       run_id <- "lt"
