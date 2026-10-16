@@ -1,4 +1,4 @@
-# Lineage Trees
+# BCR Lineage Trees
 
 Reconstruct BCR clonal lineages and find the relatives of a known antibody. This Platforma block groups clonotypes into clonal lineages per donor, builds a phylogenetic tree for each lineage with its ancestral sequences reconstructed, and reports where each clonotype sits in that history: its mutations from the germline, and how far it lies along the tree from a known antibody.
 
@@ -25,7 +25,7 @@ Clonotypes descended from one naive B cell form a clonal lineage whose members d
 
 | | |
 |---|---|
-| Block title in app | Lineage Trees |
+| Block title in app | BCR Lineage Trees |
 | Receptor | BCR (IG) only |
 | Modalities | Bulk heavy chain and paired single cell, mixed in one run |
 | Tools | [HILARy](https://github.com/statbiophys/HILARy), [TIgGER](https://tigger.readthedocs.io/), [Dowser](https://dowser.readthedocs.io/), [FastTree](https://morgannprice.github.io/fasttree/), [raxml-ng](https://github.com/amkozlov/raxml-ng), optionally [IgPhyML](https://github.com/immcantation/igphyml) |

@@ -68,7 +68,7 @@ watch(
 
 <template>
   <PlBlockPage v-model:subtitle="subtitle" :subtitle-placeholder="defaultSubtitle(app.model.data)">
-    <template #title>Lineage Trees</template>
+    <template #title>BCR Lineage Trees</template>
 
     <template #append>
       <PlBtnGhost @click.stop="() => (view.settingsOpen = true)">

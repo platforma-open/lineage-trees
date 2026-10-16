@@ -43,7 +43,7 @@
       "ui": "@platforma-open/milaboratories.lineage-trees.ui/dist"
     },
     "meta": {
-      "title": "Lineage Trees",
+      "title": "BCR Lineage Trees",
       "description": "Groups BCR clonotypes into clonal lineages, builds a phylogenetic tree for each, and exports per-clonotype lineage and mutation data.",
       "longDescription": "file:../docs/description.md",
       "logo": "file:logos/block-logo.png",
