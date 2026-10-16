@@ -615,6 +615,8 @@ if (g$ok) {
   built_by <- g$builders$tree_builder[nzchar(g$builders$tree_builder)]
   ok(first, nrow(g$nodes) > 0 && length(built_by) > 0 && all(built_by == "igphyml"))
   ok("tiny: IgPhyML gets one omega per chain", grepl("partition: hl", g$log))
+  ok("tiny: the log has none of Dowser's per-call IgPhyML warnings",
+     !any(grepl("split codons|Omega parameter", g$log)))
   observed <- table(g$nodes$lineage_id[g$nodes$is_observed == "true"])
   ok("tiny: IgPhyML builds a five-tip lineage", any(observed >= 5))
   check_topology(g$nodes, "tiny")

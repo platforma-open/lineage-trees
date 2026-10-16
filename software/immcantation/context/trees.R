@@ -1207,12 +1207,15 @@ attempt_build <- function(build, p, on, nproc) {
   if (!nrow(on)) return(simpleError("no eligible lineages"))
   tryCatch(
     if (build == "igphyml") {
-      # Also buildIgphyml's default; named to show the shared threshold.
+      # asrc is also buildIgphyml's default; named to show the shared threshold. omega and
+      # rates are what buildIgphyml falls back to for each partition, given so it does not warn.
+      hl <- identical(p, "hl")
       # buildIgphyml warns about split codons on every call, whatever the data. Ours keep their
       # bases at germline positions, which IgPhyML reads as a partly known codon, so it is dropped.
       withCallingHandlers(
         getTrees(on, build = "igphyml", check_divergence = FALSE, exec = igphyml, nproc = nproc, quiet = 1,
-                 partition = p, asrc = ASR_CREDIBLE_MASS, rseed = TREE_SEED),
+                 partition = p, asrc = ASR_CREDIBLE_MASS, rseed = TREE_SEED,
+                 omega = if (hl) "e,e" else "e", rates = if (hl) "0,1" else NULL),
         warning = function(w) {
           if (grepl("split codons", conditionMessage(w), fixed = TRUE)) invokeRestart("muffleWarning")
         })
