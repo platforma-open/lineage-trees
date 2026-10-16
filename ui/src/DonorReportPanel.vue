@@ -41,6 +41,10 @@ const handle = computed(() =>
     <div class="log">
       <PlLogView v-if="tab === 'preparation'" :value="preparationLog || 'Not started.'" />
       <PlLogView v-else-if="handle" :log-handle="handle" />
+      <PlLogView
+        v-else-if="row.empty"
+        value="No clonotypes in the picked datasets, so this stage did not run."
+      />
       <PlLogView v-else value="Not started." />
     </div>
   </div>

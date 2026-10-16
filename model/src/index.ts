@@ -797,17 +797,27 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       .sort(),
   )
 
-  /** Donors with no clonotypes in the picked datasets, once clustering has run. */
-  .output("emptyDonors", (ctx): string[] =>
-    (
+  /**
+   * Donors with no clonotypes in the picked datasets: from the split as soon as it has run (they
+   * run no stages), then also those whose clonotypes all dropped out before clustering.
+   */
+  .output("emptyDonors", (ctx): string[] => {
+    const counts =
+      ctx.outputs
+        ?.resolve({ field: "donorClonotypes", allowPermanentAbsence: true, stableIfNotFound: true })
+        ?.getDataAsJson<Record<string, number>>() ?? {};
+    const stats =
       ctx.outputs
         ?.resolve({ field: "donorStats", allowPermanentAbsence: true, stableIfNotFound: true })
-        ?.getDataAsJson<DonorStats[]>() ?? []
-    )
-      .filter((stats) => stats.clonotype_count === 0)
-      .map((stats) => stats.donor)
-      .sort(),
-  )
+        ?.getDataAsJson<DonorStats[]>() ?? [];
+    const empty = new Set(
+      Object.entries(counts)
+        .filter(([, n]) => n === 0)
+        .map(([donor]) => donor),
+    );
+    for (const s of stats) if (s.clonotype_count === 0) empty.add(s.donor);
+    return [...empty].sort();
+  })
 
   /** Per-donor clonotype and lineage counts, once clustering has run. */
   .output("donorStats", (ctx) =>

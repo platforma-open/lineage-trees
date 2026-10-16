@@ -100,7 +100,7 @@ def main(tmp: Path) -> None:
           "--out-annotations", tmp / "annotations.tsv", "--out-known", tmp / "known.tsv",
           "--out-gene-usage", tmp / "gene-usage.json")
     stage("split", "--clonotypes", merged, "--abundance", abundance, "--donors", donors_tsv,
-          "--out-dir", tmp / "split", *donor_args)
+          "--out-dir", tmp / "split", "--out-counts", tmp / "split-counts.json", *donor_args)
     for d in ("lineages", "nodes", "node-links"):
         (tmp / d).mkdir()
     per_donor = {}
@@ -130,6 +130,9 @@ def main(tmp: Path) -> None:
     ok("a clonotype seen in two donors goes to both", "0_both" in split[0] and "0_both" in split[1])
     ok("one seen in no sample with a donor goes to none", not any("0_zero" in s for s in split))
     ok("a donor with no samples gets an empty table", not split[2])
+    counts = json.loads((tmp / "split-counts.json").read_text())
+    ok("counts name each donor with its table's size, zero for the empty one",
+       counts == {d: len(split[i]) for i, d in enumerate(donors)} and counts[donors[2]] == 0)
 
     print("== cluster ==")
     a, b = per_donor["A"], per_donor["B"]

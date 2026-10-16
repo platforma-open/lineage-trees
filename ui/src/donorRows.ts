@@ -32,6 +32,8 @@ export type DonorRow = {
   /** The stage whose log is the one to open first. */
   currentStage: Stage;
   logs: Partial<Record<Stage, AnyLogHandle>>;
+  /** No clonotypes: its stages did not run, so it has no logs. */
+  empty: boolean;
   clonotypes?: number;
   lineages?: number;
 };
@@ -68,6 +70,8 @@ export function useDonorRows() {
     const collectLog = out.collectLog;
     const isRunning = out.isRunning === true;
     const stats = new Map((out.donorStats ?? []).map((s) => [s.donor, s]));
+    // Donors without clonotypes run no stages, so they have no logs to wait on.
+    const empty = new Set(out.emptyDonors ?? []);
     // The run's donors are known from its args, so rows show before any stage starts.
     const donors = [
       ...new Set([
@@ -77,6 +81,7 @@ export function useDonorRows() {
       ]),
     ].sort();
     const allTreesDone = donors.every((d) => {
+      if (empty.has(d)) return true;
       const h = logs.trees.get(d);
       return h !== undefined && !isLiveLog(h);
     });
@@ -101,7 +106,7 @@ export function useDonorRows() {
         nextStarted = false,
       ): StageProgress => {
         const h = handle(key);
-        if (h !== undefined && (!isLiveLog(h) || nextStarted)) {
+        if (empty.has(donor) || (h !== undefined && (!isLiveLog(h) || nextStarted))) {
           return { status: "done", text: "Done", percent: 100 };
         }
         if (h === undefined && !waiting) return { status: "not_started", text: "Queued" };
@@ -110,7 +115,8 @@ export function useDonorRows() {
         return { status: "running", text: step, percent };
       };
 
-      const done = (key: keyof typeof logs) => handle(key) !== undefined && !live(key);
+      const done = (key: keyof typeof logs) =>
+        empty.has(donor) || (handle(key) !== undefined && !live(key));
       const results = (): StageProgress => {
         if (collectLog !== undefined && !isLiveLog(collectLog)) {
           // The backend then imports the tables as columns, which reports no progress.
@@ -147,8 +153,8 @@ export function useDonorRows() {
         trees: stage("trees", done("clustering"), "Starting", "Starting", collectLog !== undefined),
         results: results(),
       };
-      // A donor with no clonotypes finishes every stage on nothing; say so rather than "Done".
-      if (stats.get(donor)?.clonotype_count === 0) {
+      // A donor with no clonotypes skips every stage; say so rather than "Done".
+      if (empty.has(donor)) {
         for (const { key } of STAGES) {
           if (progress[key].status === "done") progress[key].text = "No clonotypes";
         }
@@ -170,6 +176,7 @@ export function useDonorRows() {
         progress,
         currentStage: running?.key ?? (done("trees") ? "trees" : "alleles"),
         logs: handles,
+        empty: empty.has(donor),
         clonotypes: stats.get(donor)?.clonotype_count,
         lineages: stats.get(donor)?.lineage_count,
       } satisfies DonorRow;

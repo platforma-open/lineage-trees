@@ -294,9 +294,11 @@ def split(args: argparse.Namespace) -> None:
     def write(index: int, frame: pd.DataFrame) -> None:
         frame.to_csv(args.out_dir / f"donor-{index}.tsv", sep="\t", index=False)
 
-    # No donor column: everything is one donor.
+    # No donor column: everything is one donor, and it always runs.
     if not args.donor:
         write(0, clonotypes)
+        if args.out_counts is not None:
+            args.out_counts.write_text("{}")
         print(f"single donor: {len(clonotypes)} clonotypes", file=sys.stderr)
         return
 
@@ -312,11 +314,16 @@ def split(args: argparse.Namespace) -> None:
     placed = set(seen["sequence_id"])
     unplaced = len(set(clonotypes["sequence_id"]) - placed)
 
+    counts = {}
     for index, donor in enumerate(args.donor):
         ids = set(seen.loc[seen["donor"] == donor, "sequence_id"])
         subset = clonotypes[clonotypes["sequence_id"].isin(ids)]
         write(index, subset)
+        counts[donor] = len(subset)
         print(f"donor {donor!r}: {len(subset)} clonotypes", file=sys.stderr)
+    # The workflow skips a donor's stages when its count is zero.
+    if args.out_counts is not None:
+        args.out_counts.write_text(json.dumps(counts))
 
     if shared:
         print(
@@ -1129,7 +1136,8 @@ def collect(args: argparse.Namespace) -> None:
             for index, donor in enumerate(donors):
                 path = args.logs_dir / f"donor-{index}.log"
                 out.write(f"=== {donor if donor is not None else 'all samples'} ===\n")
-                out.write(path.read_text() if path.exists() else "no log\n")
+                # No log: the donor had no clonotypes, so nothing ran.
+                out.write(path.read_text() if path.exists() else "no clonotypes, nothing ran\n")
     progress("Collected: 100%")
 
 
@@ -1178,6 +1186,7 @@ def main() -> None:
     sp.add_argument("--abundance", type=Path)
     sp.add_argument("--donors", type=Path, help="sample_id, donor")
     sp.add_argument("--out-dir", required=True, type=Path)
+    sp.add_argument("--out-counts", type=Path, help="JSON: clonotypes per donor, by name")
     sp.add_argument(
         "--donor",
         action="append",

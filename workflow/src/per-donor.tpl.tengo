@@ -1,5 +1,5 @@
 // Per-donor alleles, alignment, clustering and trees; no lineage spans donors.
-// Ephemeral: the donor count is data. It only dispatches: the work runs in pure stage templates
+// Ephemeral: the donor list is data. It only dispatches: the work runs in pure stage templates
 // whose outputs the block keeps. Ids are position-prefixed; `collect` splits datasets back out.
 
 self := import("@platforma-sdk/workflow-tengo:tpl")
@@ -7,13 +7,10 @@ self := import("@platforma-sdk/workflow-tengo:tpl")
 exec := import("@platforma-sdk/workflow-tengo:exec")
 assets := import("@platforma-sdk/workflow-tengo:assets")
 maps := import("@platforma-sdk/workflow-tengo:maps")
-ll := import("@platforma-sdk/workflow-tengo:ll")
 render := import("@platforma-sdk/workflow-tengo:render")
 pcolumn := import("@platforma-sdk/workflow-tengo:pframes.pcolumn")
-text := import("text")
 json := import("json")
 
-hilarySw := assets.importSoftware("@platforma-open/milaboratories.lineage-trees.hilary:main")
 mixcrSw := assets.importSoftware("@platforma-open/milaboratories.software-mixcr:memory-from-limits")
 
 // Pure stages, split where the settings split, so a change reruns only its stage and later ones.
@@ -28,74 +25,22 @@ f := exec.formula
 self.awaitState("params", "ResourceReady")
 // InputsLocked: per-sample file refs must be iterable, but content is not read here.
 self.awaitState("clns", { wildcard: "*" }, "InputsLocked")
-// Null resource when no donor column is picked.
-self.awaitState("donorColumn", "ResourceReady")
-// The tables are only handed on, so they are not awaited: waiting would make the merge run
-// even when every stage is recovered.
+// Clonotypes per donor, so a donor without any gets no jobs. This waits on merge and split; the
+// block keeps the counts as an output, so a rerun finds them and only a changed split reruns.
+self.awaitState("clonotypeCounts", "ResourceReady")
+// The tables are only handed on, so they are not awaited.
 
 // Same prefix `merge` put on every id.
 prefixed := func(index, id) {
 	return index + "_" + id
 }
 
-// Name plus sorted domain; tells whether the donor column and a dataset share samples.
-axisKey := func(axis) {
-	key := axis.name
-	domain := is_undefined(axis.domain) ? {} : axis.domain
-	for k in maps.getKeys(domain) {
-		key += "|" + k + "=" + domain[k]
-	}
-	return key
-}
-
 self.body(func(inputs) {
 	params := inputs.params
+	donors := params.donors
+	sampleToDonor := params.sampleToDonor
+	counts := inputs.clonotypeCounts.getDataAsJson()
 
-	// With no donor column the whole input is one unnamed group.
-	donors := []
-	sampleToDonor := {}
-	donorsTsv := ""
-	if params.hasDonorColumn {
-		// Datasets on another sample axis get no donor and skip clustering; `split` counts them and the model warns.
-		donorAxisKey := axisKey(inputs.donorColumn.spec.axesSpec[0])
-		covered := []
-		for ds in params.datasets {
-			if axisKey(ds.sampleAxis) == donorAxisKey {
-				covered = append(covered, ds.index)
-			}
-		}
-
-		// Strip tabs and newlines once, so every use of a donor name matches and no value shifts a column.
-		clean := func(v) { return text.replace(text.replace(v, "\t", " ", -1), "\n", " ", -1) }
-		donorSet := {}
-		for key, value in inputs.donorColumn.data.getDataAsJson()["data"] {
-			// Metadata may be numeric; donors are named and compared as text throughout.
-			// No value or a blank one is no donor: the sample is left out, as the model warns.
-			if is_undefined(value) {
-				continue
-			}
-			donor := text.trim_space(clean(is_string(value) ? value : string(value)))
-			if donor == "" {
-				continue
-			}
-			sample := json.decode(key)[0]
-			for index in covered {
-				sampleToDonor[prefixed(index, sample)] = donor
-			}
-			donorSet[donor] = true
-		}
-		// Sorted, so two equivalent runs build the same graph and dedup.
-		donors = maps.getKeys(donorSet)
-		// Otherwise every group would be named by an undefined donor. The model warns before the run.
-		if len(donors) == 0 {
-			ll.panic("No sample in the picked datasets has a value in the donor column, so nothing can be clustered. Fill in the donor column or clear it.")
-		}
-
-		donorsTsv = "sample_id\tdonor\n"
-		for sample in maps.getKeys(sampleToDonor) {
-			donorsTsv += clean(sample) + "\t" + sampleToDonor[sample] + "\n"
-		}
-	}
 	groupCount := len(donors) == 0 ? 1 : len(donors)
 	groupName := func(i) { return params.hasDonorColumn ? donors[i] : "all samples" }
 	inGroup := func(i, sample) { return !params.hasDonorColumn || sampleToDonor[sample] == donors[i] }
@@ -108,37 +53,6 @@ self.body(func(inputs) {
 	clusteringMethods := pcolumn.resourceMapBuilder(1)
 	// "tigger" or "reference" and why, as JSON reported by the allele stage.
 	alleleRoutes := pcolumn.resourceMapBuilder(1)
-
-	// Per-donor files are numbered, not named: donor names are arbitrary text.
-
-	splitCmd := exec.builder().
-		software(hilarySw).
-		// Measured at about 2.2x its inputs, like merge.
-		resources({
-			onCPU: {
-				cpu: 1,
-				ram: f.size("splitInput").times(4).plus(f.mib(512)).
-					between(f.gib(1), f.gib(256)).staticFallback(f.gib(4))
-			}
-		}).
-		addFile("clonotypes.tsv", inputs.clonotypeTable, { tag: "splitInput" }).
-		addFile("abundance.tsv", inputs.abundanceTable, { tag: "splitInput" }).
-		arg("split").
-		arg("--clonotypes").arg("clonotypes.tsv").
-		arg("--abundance").arg("abundance.tsv").
-		arg("--out-dir").arg("split")
-
-	if params.hasDonorColumn {
-		splitCmd.writeFile("donors.tsv", donorsTsv)
-		splitCmd.arg("--donors").arg("donors.tsv")
-		for donor in donors {
-			splitCmd.arg("--donor").arg(donor)
-		}
-	}
-	for i := 0; i < groupCount; i++ {
-		splitCmd.saveFile("split/donor-" + string(i) + ".tsv")
-	}
-	split := splitCmd.saveStdoutContent().printErrStreamToStdout().run()
 
 	allClns := []
 	for ds in params.datasets {
@@ -179,7 +93,10 @@ self.body(func(inputs) {
 	resultsToCache := {}
 	donorFiles := {}
 	for i := 0; i < groupCount; i++ {
-		suffix := "donor-" + string(i) + ".tsv"
+		// A donor without clonotypes runs nothing; collect still lists it, with zero counts.
+		if params.hasDonorColumn && counts[donors[i]] == 0 {
+			continue
+		}
 
 		// TIgGER pooled per donor. MiXCR findAlleles rejects mixed feature sets, so it would split a donor by dataset.
 
@@ -215,7 +132,7 @@ self.body(func(inputs) {
 		}
 
 		prep := outputsOf("prep", render.create(prepTpl, {
-			clonotypes: split.getFile("split/" + suffix),
+			clonotypes: inputs.splitTables[string(i)],
 			airr: airrFiles,
 			params: { useLightChains: params.useLightChains }
 		}))
@@ -273,7 +190,7 @@ self.body(func(inputs) {
 		annotations: inputs.annotationsTable,
 		sampleMetadata: sampleMetadata,
 		donors: donorFiles,
-		params: { datasets: collectDatasets, donors: donors, donorsTsv: donorsTsv }
+		params: { datasets: collectDatasets, donors: donors, donorsTsv: params.donorsTsv }
 	}))
 	resultsToCache.collect = collected
 
@@ -293,8 +210,6 @@ self.body(func(inputs) {
 		nodeAbundance: collected.nodeAbundance,
 		donorStats: collected.donorStats,
 		runId: collected.runId,
-		// Per-donor counts, plus clonotypes shared between donors or placed nowhere.
-		clusteringLog: split.getStdoutContent(),
 		treesLog: collected.treesLog,
 		resultsToCache: resultsToCache
 	}
