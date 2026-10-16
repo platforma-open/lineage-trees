@@ -1432,7 +1432,7 @@ wf.body(func(args) {
 							domain: { "pl7.app/clustering/blockId": blockId },
 							annotations: {
 								"pl7.app/isLinkerColumn": "true",
-								"pl7.app/linkLabel": "Known antibody",
+								"pl7.app/linkLabel": "Nearest known antibody",
 								"pl7.app/label": "Nearest known antibody",
 								"pl7.app/description": "Links a clonotype to the known antibody its mutation count is measured to, so the known antibody's own columns can be read beside it."
 							}
