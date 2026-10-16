@@ -1143,7 +1143,8 @@ def collect(args: argparse.Namespace) -> None:
 
 def count_hits(args: argparse.Namespace) -> None:
     """Count the nodes and lineages a sequence search hit, as JSON for the UI."""
-    hits = pd.read_csv(args.hits, sep="\t", dtype=str, keep_default_na=False)
+    # The lineage key only: the hits also carry each node's whole sequence, too large to load at scale.
+    hits = pd.read_csv(args.hits, sep="\t", dtype=str, keep_default_na=False, usecols=[0])
     lineage_column = hits.columns[0] if len(hits.columns) else None
     args.out.write_text(json.dumps({
         "nodes": int(len(hits)),
