@@ -194,7 +194,11 @@ const adaptiveNoteOpen = ref(true);
           </template>
         </PlNumberField>
       </PlRow>
-      <PlDropdown v-model="app.model.data.igPhyMLScope" :options="igPhyMLOptions" label="IgPhyML">
+      <PlDropdown
+        v-model="app.model.data.igPhyMLScope"
+        :options="igPhyMLOptions"
+        label="IgPhyML [slow]"
+      >
         <template #tooltip>
           Which lineages IgPhyML builds instead of FastTree and RAxML. Its HLP19 codon model
           accounts for the context-dependent hotspot biases of somatic hypermutation and resolves
