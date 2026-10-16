@@ -50,7 +50,13 @@ const columnDefs: ColDef<DonorRow>[] = [
       headerComponentParams: { type: "Progress" } satisfies PlAgHeaderComponentParams,
       flex: 1,
       minWidth: 160,
-      valueGetter: (p) => p.data?.progress[key].text,
+      // The grid redraws a cell only when this value changes, so it carries the percent too.
+      valueGetter: (p) => {
+        const stage = p.data?.progress[key];
+        return (
+          stage && (stage.percent === undefined ? stage.text : `${stage.text} ${stage.percent}%`)
+        );
+      },
       progress(_value, cellData) {
         const stage = cellData.data?.progress[key];
         if (stage === undefined) return { status: "not_started", text: "Queued" };
