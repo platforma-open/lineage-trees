@@ -1,5 +1,14 @@
 # @platforma-open/milaboratories.lineage-trees.workflow
 
+## 1.2.2
+
+### Patch Changes
+
+- cd9c269: update sdk dependencies
+- Updated dependencies [b2b91ba]
+  - @platforma-open/milaboratories.lineage-trees.hilary@1.2.1
+  - @platforma-open/milaboratories.lineage-trees.immcantation@1.2.1
+
 ## 1.2.1
 
 ### Patch Changes

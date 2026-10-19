@@ -1,5 +1,11 @@
 # @platforma-open/milaboratories.lineage-trees.immcantation
 
+## 1.2.1
+
+### Patch Changes
+
+- b2b91ba: update sdk dependencies
+
 ## 1.2.0
 
 ### Minor Changes

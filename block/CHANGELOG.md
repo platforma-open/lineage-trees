@@ -1,5 +1,11 @@
 # @platforma-open/milaboratories.lineage-trees.block
 
+## 1.2.2
+
+### Patch Changes
+
+- cd9c269: update sdk dependencies
+
 ## 1.2.1
 
 ### Patch Changes

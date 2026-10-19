@@ -1,5 +1,13 @@
 # @platforma-open/milaboratories.lineage-trees.ui
 
+## 1.1.1
+
+### Patch Changes
+
+- cd9c269: update sdk dependencies
+- Updated dependencies [cd9c269]
+  - @platforma-open/milaboratories.lineage-trees.model@1.1.1
+
 ## 1.1.0
 
 ### Minor Changes
