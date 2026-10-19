@@ -8,14 +8,14 @@ packages:
   - ui
   - workflow
 catalog:
-  "@platforma-sdk/model": 1.84.3
-  "@platforma-sdk/ui-vue": 1.84.5
-  "@platforma-sdk/workflow-tengo": 6.12.1
-  "@platforma-sdk/test": 1.84.4
+  "@platforma-sdk/model": 1.85.2
+  "@platforma-sdk/ui-vue": 1.85.2
+  "@platforma-sdk/workflow-tengo": 6.16.0
+  "@platforma-sdk/test": 1.85.2
   "@platforma-sdk/block-kind": 1.1.0
-  "@platforma-sdk/block-tools": 2.16.5
-  "@platforma-sdk/tengo-builder": 4.1.5
-  "@platforma-sdk/package-builder": 3.16.0
+  "@platforma-sdk/block-tools": 2.16.15
+  "@platforma-sdk/tengo-builder": 4.1.11
+  "@platforma-sdk/package-builder": 3.16.1
   "@milaboratories/ts-builder": 1.7.2
   "@milaboratories/ts-configs": 1.4.0
   turbo: ~2.8.11
@@ -27,7 +27,7 @@ catalog:
   # The R run environment for the immcantation binary, beside its docker image.
   "@platforma-open/milaboratories.runenv-r-lineage-trees": 0.1.2
   "@platforma-open/milaboratories.software-mixcr": 4.7.0-395-develop
-  "@milaboratories/graph-maker": ^1.10.0
+  "@milaboratories/graph-maker": ^1.10.3
   vue: 3.5.24
   "@milaboratories/helpers": 1.14.5
   # The overview grid, at the version ui-vue itself depends on.
