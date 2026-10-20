@@ -1,6 +1,7 @@
 import type {
   AxisSpec,
   InferOutputsType,
+  Option,
   PColumnSpec,
   PlDataTableModel,
   PlDataTableStateV2,
@@ -11,6 +12,8 @@ import type {
 } from "@platforma-sdk/model";
 import {
   BlockModelV3,
+  buildDatasetOptions,
+  createGlobalPObjectId,
   DataColumn,
   DataModelBuilder,
   canonicalizeAxisId,
@@ -127,6 +130,8 @@ export type BlockData = {
   }[];
   /** Named sets of collected nodes, one section each. Their clonotypes are projected as `BlockArgs.baskets`. Absent on older projects. */
   baskets: NodeBasket[];
+  /** A subset column per picked dataset, keyed by `refKey`; only its clonotypes enter. Absent on older projects. */
+  datasetFilters?: Record<string, PlRef>;
   /** Subtitle the user typed; empty or absent falls back to `defaultSubtitle`. Absent on older projects. */
   customBlockLabel?: string;
 };
@@ -214,6 +219,8 @@ export type BlockArgs = {
   customBlockLabel?: string;
   /** Baskets with clonotypes, sorted by id, keys sorted per dataset run id. Absent when none. */
   baskets?: BasketArg[];
+  /** Per dataset in `datasets` order: its subset's column id, or null for all of it. Absent when none has one. */
+  inputFilters?: (string | null)[];
 };
 
 /** A basket as exported: one subset column per dataset it has clonotypes in. */
@@ -429,6 +436,12 @@ function donorsOfSamples(
 const readClusteringMethod = (acc: TreeNodeAccessor) =>
   acc.getDataAsJson<{ method: string; reason: string }>();
 
+// Key axes of the datasets this block accepts.
+const DATASET_KEY_AXES: ReadonlySet<string> = new Set([
+  "pl7.app/vdj/clonotypeKey",
+  "pl7.app/vdj/scClonotypeKey",
+]);
+
 /** Clonotyping datasets: bulk and single-cell anchor columns keyed by sample. */
 const DATASET_QUERY = [
   {
@@ -548,6 +561,10 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
     if (problem !== undefined) throw new Error(problem);
     // Known antibody refs no longer in `datasets` are dropped rather than failing the run.
     const knownDatasets = effectiveKnown(data);
+    const filterIds = datasets.map((ref) => {
+      const filter = data.datasetFilters?.[refKey(ref)];
+      return filter === undefined ? null : createGlobalPObjectId(filter.blockId, filter.name);
+    });
     const clusteringMode = data.clusteringMode ?? "fixed";
     // Unset means no cap and a floor of two.
     const maxTipsPerTree = data.maxTipsPerTree;
@@ -590,6 +607,8 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       customBlockLabel: data.customBlockLabel?.trim() || undefined,
       // Undefined without exportable baskets, for the same reason.
       baskets: basketArgs(data.baskets ?? []),
+      // Absent without subsets, so unfiltered args are unchanged.
+      ...(filterIds.some((id) => id !== null) && { inputFilters: filterIds }),
     };
   })
   // Inverse of `init`, so an exported template round-trips.
@@ -602,6 +621,27 @@ export const platforma = BlockModelV3.create({ dataModel, kind })
       return spec !== undefined && datasetModality(spec) !== undefined;
     }),
   )
+
+  /**
+   * Each offered dataset's subset columns (e.g. Repertoire Labeling labels), keyed by `refKey`.
+   * Only subsets keyed by the dataset's clonotype axis alone.
+   */
+  .output("subsetOptions", (ctx): Record<string, readonly Option[]> => {
+    const out: Record<string, readonly Option[]> = {};
+    const options =
+      buildDatasetOptions(ctx, {
+        primary: (spec) => datasetModality(spec) !== undefined,
+        filter: (spec) =>
+          isPColumnSpec(spec) &&
+          spec.axesSpec.length === 1 &&
+          DATASET_KEY_AXES.has(spec.axesSpec[0].name),
+        requireEnrichments: false,
+      }) ?? [];
+    for (const option of options) {
+      if (option.filters !== undefined) out[refKey(option.primary.ref)] = option.filters;
+    }
+    return out;
+  })
 
   /**
    * Each offered dataset's alignment route, keyed by `refKey`. Reads no settings, so it is

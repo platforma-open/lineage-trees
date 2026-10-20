@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { BasketNode } from "@platforma-open/milaboratories.lineage-trees.model";
-import { isCurrent } from "@platforma-open/milaboratories.lineage-trees.model";
+import { isCurrent, refKey } from "@platforma-open/milaboratories.lineage-trees.model";
 import type { PlSelectionModel } from "@platforma-sdk/model";
 import { createPlSelectionModel } from "@platforma-sdk/model";
 import {
@@ -36,6 +36,11 @@ const fromEarlierRun = computed(() =>
     ? []
     : (basket.value?.nodes ?? []).filter((node) => !isCurrent(node, runKey.value)),
 );
+// Earlier-run nodes may lie outside a picked subset, so they are not shown while one is picked.
+const subsetPicked = computed(() => {
+  const filters = app.model.data.datasetFilters ?? {};
+  return app.model.data.datasets.some((ref) => filters[refKey(ref)] !== undefined);
+});
 const inThisRun = computed(() =>
   runKey.value === undefined
     ? 0
@@ -142,7 +147,17 @@ const earlierColumns = computed<ColDef<BasketNode>[]>(() => [
         show-columns-panel
       />
 
-      <template v-if="fromEarlierRun.length > 0">
+      <template v-if="fromEarlierRun.length > 0 && subsetPicked">
+        <PlAlert type="info">
+          {{ fromEarlierRun.length }}
+          {{ fromEarlierRun.length === 1 ? "node" : "nodes" }} from earlier runs
+          {{ fromEarlierRun.length === 1 ? "is" : "are" }} hidden while a subset is selected.
+        </PlAlert>
+        <div>
+          <PlBtnSecondary @click="removeEarlier">Remove nodes from earlier runs</PlBtnSecondary>
+        </div>
+      </template>
+      <template v-else-if="fromEarlierRun.length > 0">
         <PlAlert type="info">
           {{ fromEarlierRun.length }}
           {{ fromEarlierRun.length === 1 ? "node was" : "nodes were" }} added from an earlier run.
