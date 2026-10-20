@@ -403,12 +403,12 @@ wf.body(func(args) {
 	for i := 0; i < datasetCount; i++ {
 		datasets = append(datasets, describeDataset(i))
 	}
-	// One distinct name per dataset from the abundance column's trace, derived as tables
-	// derive headings, so the names here and the "Members" headings agree.
+	// One distinct name per dataset from the same trace root as its columns (the subset on a
+	// subset run), derived as tables derive headings, so names and "Members" headings agree.
 	traces := []
 	fallbacks := []
 	for ds in datasets {
-		traces = append(traces, pSpec.makeTrace(ds.abundanceColumn.spec).value)
+		traces = append(traces, pSpec.makeTrace(is_undefined(ds.subsetSpec) ? ds.abundanceColumn.spec : ds.subsetSpec).value)
 		fallbacks = append(fallbacks, "Dataset " + string(ds.index))
 	}
 	names := datasetLabels.distinctLabels(traces, fallbacks)
@@ -1636,9 +1636,16 @@ wf.body(func(args) {
 			for key in keys {
 				rows[json.encode([key])] = 1
 			}
+			basketDomain := {
+				"pl7.app/clustering/blockId": blockId,
+				"pl7.app/clustering/basketId": basket.id
+			}
+			if !is_undefined(ds.subsetId) {
+				basketDomain["pl7.app/inputSubset"] = ds.subsetId
+			}
 			exportsBuilder.add("basket." + basket.id + "." + ds.key,
 				// Pickers name a filter from its trace, not its label.
-				pSpec.makeTrace(ds.abundanceColumn.spec, traceStep, {
+				pSpec.makeTrace(is_undefined(ds.subsetSpec) ? ds.abundanceColumn.spec : ds.subsetSpec, traceStep, {
 					type: "milaboratories.lineage-trees.basket",
 					importance: 100,
 					label: basket.name
@@ -1646,10 +1653,7 @@ wf.body(func(args) {
 					kind: "PColumn",
 					name: "pl7.app/clustering/basket",
 					valueType: "Int",
-					domain: {
-						"pl7.app/clustering/blockId": blockId,
-						"pl7.app/clustering/basketId": basket.id
-					},
+					domain: basketDomain,
 					axesSpec: [ds.clonotypeAxisSpec],
 					annotations: {
 						"pl7.app/label": basket.name,

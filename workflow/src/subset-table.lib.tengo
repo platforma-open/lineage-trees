@@ -3,9 +3,8 @@
 pframes := import("@platforma-sdk/workflow-tengo:pframes")
 ll := import("@platforma-sdk/workflow-tengo:ll")
 
-// A TSV builder restricted to the rows of an optional subset column. Without one it is the
-// plain xsv builder. With one, every added column becomes its own primary carrying the filter,
-// full-joined: the rows are the union of the columns (a clonotype may lack a chain).
+// A TSV builder for the rows of an optional subset column; without one, the plain xsv builder.
+// With one, each column is a filtered primary, full-joined, as a clonotype may lack a chain.
 newTableBuilder := func(filterColumn) {
 	if is_undefined(filterColumn) {
 		b := pframes.tsvFileBuilder()

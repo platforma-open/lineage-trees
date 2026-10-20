@@ -38,6 +38,14 @@ const pickedDatasets = computed({
   get: () => app.model.data.datasets,
   set: (refs) => {
     app.model.data.datasets = refs;
+    // An unpicked dataset drops its subset, so picking it again starts from all of it.
+    const kept = new Set(refs.map(refKey));
+    const filters = app.model.data.datasetFilters ?? {};
+    if (Object.keys(filters).some((key) => !kept.has(key))) {
+      app.model.data.datasetFilters = Object.fromEntries(
+        Object.entries(filters).filter(([key]) => kept.has(key)),
+      );
+    }
     settleScope();
   },
 });
@@ -65,13 +73,16 @@ const unaligned = computed(() => {
     .filter((o) => pickedKeys.value.has(refKey(o.ref)) && routes[refKey(o.ref)] === "none")
     .map((o) => o.label);
 });
-// Picked datasets that have subset columns, each with a dropdown to narrow it to one of them.
+// Picked datasets that have subset columns, or a picked subset that has since gone (so it can be
+// seen and cleared), each with a dropdown to narrow the dataset.
 const subsetPickers = computed(() => {
   const subsets = app.model.outputs.subsetOptions ?? {};
+  const picked = app.model.data.datasetFilters ?? {};
+  const hasPicker = (key: string) => (subsets[key]?.length ?? 0) > 0 || picked[key] !== undefined;
   return (app.model.outputs.inputOptions ?? [])
-    .filter((o) => pickedKeys.value.has(refKey(o.ref)) && (subsets[refKey(o.ref)]?.length ?? 0) > 0)
+    .filter((o) => pickedKeys.value.has(refKey(o.ref)) && hasPicker(refKey(o.ref)))
     .sort((a, b) => refKey(a.ref).localeCompare(refKey(b.ref)))
-    .map((o) => ({ key: refKey(o.ref), label: o.label, options: subsets[refKey(o.ref)] }));
+    .map((o) => ({ key: refKey(o.ref), label: o.label, options: subsets[refKey(o.ref)] ?? [] }));
 });
 const setSubset = (key: string, filter: PlRef | undefined) => {
   const next = { ...app.model.data.datasetFilters };
