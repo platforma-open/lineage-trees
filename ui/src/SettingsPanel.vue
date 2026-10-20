@@ -15,6 +15,7 @@ import {
   PlNumberField,
   PlRow,
 } from "@platforma-sdk/ui-vue";
+import type { PlRef } from "@platforma-sdk/model";
 import { computed, ref } from "vue";
 import { useApp } from "./app";
 
@@ -64,6 +65,20 @@ const unaligned = computed(() => {
     .filter((o) => pickedKeys.value.has(refKey(o.ref)) && routes[refKey(o.ref)] === "none")
     .map((o) => o.label);
 });
+// Picked datasets that have subset columns, each with a dropdown to narrow it to one of them.
+const subsetPickers = computed(() => {
+  const subsets = app.model.outputs.subsetOptions ?? {};
+  return (app.model.outputs.inputOptions ?? [])
+    .filter((o) => pickedKeys.value.has(refKey(o.ref)) && (subsets[refKey(o.ref)]?.length ?? 0) > 0)
+    .sort((a, b) => refKey(a.ref).localeCompare(refKey(b.ref)))
+    .map((o) => ({ key: refKey(o.ref), label: o.label, options: subsets[refKey(o.ref)] }));
+});
+const setSubset = (key: string, filter: PlRef | undefined) => {
+  const next = { ...app.model.data.datasetFilters };
+  if (filter === undefined) delete next[key];
+  else next[key] = filter;
+  app.model.data.datasetFilters = next;
+};
 const outsideDonor = computed(() => app.model.outputs.datasetsOutsideDonorColumn ?? []);
 const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
 // View state, so closing the note is not a block edit; it shows again when the panel reopens.
@@ -83,6 +98,21 @@ const adaptiveNoteOpen = ref(true);
     :error="pickedDatasets.length === 0 ? 'Input dataset is required' : undefined"
   >
   </PlDropdownMultiRef>
+  <PlDropdownRef
+    v-for="picker in subsetPickers"
+    :key="picker.key"
+    :model-value="app.model.data.datasetFilters?.[picker.key]"
+    :options="picker.options"
+    :label="`Subset of ${picker.label}`"
+    placeholder="All clonotypes"
+    clearable
+    @update:model-value="(filter) => setSubset(picker.key, filter)"
+  >
+    <template #tooltip>
+      Only the subset's clonotypes from this dataset enter clustering, allele inference and trees.
+      Datasets without a subset come in whole.
+    </template>
+  </PlDropdownRef>
   <PlDropdownMultiRef
     v-model="pickedKnown"
     :options="knownOptions"
