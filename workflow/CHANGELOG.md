@@ -1,5 +1,13 @@
 # @platforma-open/milaboratories.lineage-trees.workflow
 
+## 1.2.4
+
+### Patch Changes
+
+- c2db88d: Update MiXCR, MiTool to the versions with the rebuilt Docker images. The old images trust the compromised eMudhra intermediate CAs. Rebuild the immcantation Docker image, so it gets the current ca-certificates package.
+- Updated dependencies [c2db88d]
+  - @platforma-open/milaboratories.lineage-trees.immcantation@1.2.2
+
 ## 1.2.3
 
 ### Patch Changes
