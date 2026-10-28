@@ -1,5 +1,17 @@
 # @platforma-open/milaboratories.lineage-trees.block
 
+## 1.2.4
+
+### Patch Changes
+
+- c2db88d: Update MiXCR, MiTool to the versions with the rebuilt Docker images. The old images trust the compromised eMudhra intermediate CAs. Rebuild the immcantation Docker image, so it gets the current ca-certificates package.
+
+## 1.2.3
+
+### Patch Changes
+
+- a9cdf0e: Name the known antibody link "Nearest known antibody", so downstream blocks show "Reached via Nearest known antibody" on the link icon. Update to SDK 1.86.0.
+
 ## 1.2.2
 
 ### Patch Changes
