@@ -15,6 +15,7 @@ import {
   PlNumberField,
   PlRow,
 } from "@platforma-sdk/ui-vue";
+import type { PlRef } from "@platforma-sdk/model";
 import { computed, ref } from "vue";
 import { useApp } from "./app";
 
@@ -37,6 +38,14 @@ const pickedDatasets = computed({
   get: () => app.model.data.datasets,
   set: (refs) => {
     app.model.data.datasets = refs;
+    // An unpicked dataset drops its subset, so picking it again starts from all of it.
+    const kept = new Set(refs.map(refKey));
+    const filters = app.model.data.datasetFilters ?? {};
+    if (Object.keys(filters).some((key) => !kept.has(key))) {
+      app.model.data.datasetFilters = Object.fromEntries(
+        Object.entries(filters).filter(([key]) => kept.has(key)),
+      );
+    }
     settleScope();
   },
 });
@@ -64,6 +73,23 @@ const unaligned = computed(() => {
     .filter((o) => pickedKeys.value.has(refKey(o.ref)) && routes[refKey(o.ref)] === "none")
     .map((o) => o.label);
 });
+// Picked datasets that have subset columns, or a picked subset that has since gone (so it can be
+// seen and cleared), each with a dropdown to narrow the dataset.
+const subsetPickers = computed(() => {
+  const subsets = app.model.outputs.subsetOptions ?? {};
+  const picked = app.model.data.datasetFilters ?? {};
+  const hasPicker = (key: string) => (subsets[key]?.length ?? 0) > 0 || picked[key] !== undefined;
+  return (app.model.outputs.inputOptions ?? [])
+    .filter((o) => pickedKeys.value.has(refKey(o.ref)) && hasPicker(refKey(o.ref)))
+    .sort((a, b) => refKey(a.ref).localeCompare(refKey(b.ref)))
+    .map((o) => ({ key: refKey(o.ref), label: o.label, options: subsets[refKey(o.ref)] ?? [] }));
+});
+const setSubset = (key: string, filter: PlRef | undefined) => {
+  const next = { ...app.model.data.datasetFilters };
+  if (filter === undefined) delete next[key];
+  else next[key] = filter;
+  app.model.data.datasetFilters = next;
+};
 const outsideDonor = computed(() => app.model.outputs.datasetsOutsideDonorColumn ?? []);
 const withoutDonor = computed(() => app.model.outputs.samplesWithoutDonor);
 // View state, so closing the note is not a block edit; it shows again when the panel reopens.
@@ -83,6 +109,21 @@ const adaptiveNoteOpen = ref(true);
     :error="pickedDatasets.length === 0 ? 'Input dataset is required' : undefined"
   >
   </PlDropdownMultiRef>
+  <PlDropdownRef
+    v-for="picker in subsetPickers"
+    :key="picker.key"
+    :model-value="app.model.data.datasetFilters?.[picker.key]"
+    :options="picker.options"
+    :label="`Subset of ${picker.label}`"
+    placeholder="All clonotypes"
+    clearable
+    @update:model-value="(filter) => setSubset(picker.key, filter)"
+  >
+    <template #tooltip>
+      Only the subset's clonotypes from this dataset enter clustering, allele inference and trees.
+      Datasets without a subset come in whole.
+    </template>
+  </PlDropdownRef>
   <PlDropdownMultiRef
     v-model="pickedKnown"
     :options="knownOptions"

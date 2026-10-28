@@ -1,0 +1,35 @@
+// Tables restricted to an optional subset column (a `pl7.app/isSubset` column on a dataset's
+// clonotype axis, picked per dataset in the settings).
+pframes := import("@platforma-sdk/workflow-tengo:pframes")
+ll := import("@platforma-sdk/workflow-tengo:ll")
+
+// A TSV builder for the rows of an optional subset column; without one, the plain xsv builder.
+// With one, each column is a filtered primary, full-joined, as a clonotype may lack a chain.
+newTableBuilder := func(filterColumn) {
+	if is_undefined(filterColumn) {
+		b := pframes.tsvFileBuilder()
+		return {
+			add: b.add,
+			setAxisHeader: b.setAxisHeader,
+			build: b.build
+		}
+	}
+	tb := pframes.tableBuilder("tsv").setJoinMode("full")
+	nColumns := 0
+	return {
+		add: func(column, opts) {
+			tb.addPrimary("col" + string(nColumns), {
+				__isPrimaryRef: "v1",
+				column: column,
+				filter: filterColumn
+			}, opts)
+			nColumns += 1
+		},
+		setAxisHeader: func(matcher, header) { tb.setAxisHeader(matcher, header) },
+		build: func() { return tb.build() }
+	}
+}
+
+export ll.toStrict({
+	newTableBuilder: newTableBuilder
+})

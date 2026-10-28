@@ -37,11 +37,11 @@ catalogs:
       specifier: 1.24.0
       version: 1.24.0
     '@platforma-open/milaboratories.software-mitool':
-      specifier: 2.3.1-174-main
-      version: 2.3.1-174-main
+      specifier: 2.3.1-24-main
+      version: 2.3.1-24-main
     '@platforma-open/milaboratories.software-mixcr':
-      specifier: 4.7.0-415-develop
-      version: 4.7.0-415-develop
+      specifier: 4.7.0-395-develop
+      version: 4.7.0-395-develop
     '@platforma-sdk/block-kind':
       specifier: 1.1.0
       version: 1.1.0
@@ -55,8 +55,8 @@ catalogs:
       specifier: 4.1.13
       version: 4.1.13
     '@platforma-sdk/test':
-      specifier: 1.86.1
-      version: 1.86.1
+      specifier: 1.86.2
+      version: 1.86.2
     '@platforma-sdk/ui-vue':
       specifier: 1.86.0
       version: 1.86.0
@@ -254,7 +254,7 @@ importers:
         version: 1.86.0
       '@platforma-sdk/test':
         specifier: 'catalog:'
-        version: 1.86.1(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@7.3.6(@types/node@26.6.2)(lightningcss@1.33.0)(yaml@2.9.1))
+        version: 1.86.2(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@7.3.6(@types/node@26.6.2)(lightningcss@1.33.0)(yaml@2.9.1))
       vitest:
         specifier: 'catalog:'
         version: 4.0.18(@types/node@26.6.2)(lightningcss@1.33.0)(yaml@2.9.1)
@@ -309,10 +309,10 @@ importers:
         version: link:../software/immcantation
       '@platforma-open/milaboratories.software-mitool':
         specifier: 'catalog:'
-        version: 2.3.1-174-main
+        version: 2.3.1-24-main
       '@platforma-open/milaboratories.software-mixcr':
         specifier: 'catalog:'
-        version: 4.7.0-415-develop
+        version: 4.7.0-395-develop
       '@platforma-sdk/workflow-tengo':
         specifier: 'catalog:'
         version: 6.17.1
@@ -322,7 +322,7 @@ importers:
         version: 4.1.13
       '@platforma-sdk/test':
         specifier: 'catalog:'
-        version: 1.86.1(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(yaml@2.9.1))
+        version: 1.86.2(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(yaml@2.9.1))
       shx:
         specifier: 'catalog:'
         version: 0.4.0
@@ -1169,8 +1169,8 @@ packages:
     resolution: {integrity: sha512-i12UxMu3GnfqtDOX1NgU1JTrMxFEPG74mlN5R1hpQ83zfwvHcUbGGVOrw/BcsGMPG3PEFYK1GG0lbsGJuvE/FA==}
     engines: {node: '>=22.19.0'}
 
-  '@milaboratories/pl-drivers@1.16.35':
-    resolution: {integrity: sha512-cz5h9LZmWZb8NIAmSC3LF0V1lHz9+06vaFPWcpZKgwaU3t8UuN8xFp6IFPOY0g3sJNWnP0y53U8mEqJmouxpXg==}
+  '@milaboratories/pl-drivers@1.16.36':
+    resolution: {integrity: sha512-L6W4QSGLHYsNFcuEsutAvJB83wDc2fsgQE5mYs706SXSoDtW+tIhRCeLCFEhnIr4cw4gipCaJDEf/4OT1GXJfA==}
     engines: {node: '>=22'}
 
   '@milaboratories/pl-error-like@1.12.10':
@@ -1186,8 +1186,8 @@ packages:
   '@milaboratories/pl-http@1.2.4':
     resolution: {integrity: sha512-QKmhx+WEvJCV9dUy/SBdQk/ApaJ5ewBFgm/b+XPlS10SusAdqUUTGvK5+hq8YSuUMXlHb/dk++UtI5YlDuDl2Q==}
 
-  '@milaboratories/pl-middle-layer@1.74.10':
-    resolution: {integrity: sha512-GtCAvhz5z0/2w0QG0tuEN2r0HDRQsBMmomHO8rpbGbQqxotw8GEWBTZob5lCHh7m1GagR8KjPSD2z7PaSwwZ1g==}
+  '@milaboratories/pl-middle-layer@1.74.11':
+    resolution: {integrity: sha512-cbdRWv1zZcbRpnBTgjzbstwMF9p8H3ojP4HeowkvCfXYfyuinDi1e/+CCkQBj49zWEjMCrZlPVyXNsVk485Ovg==}
     engines: {node: '>=22.19.0'}
 
   '@milaboratories/pl-model-backend@1.4.38':
@@ -1830,11 +1830,11 @@ packages:
   '@platforma-open/milaboratories.samples-and-data@1.24.0':
     resolution: {integrity: sha512-j2FlpUAkI1YNx+qF+RibSI9HEoYyiK0MvYX9CtNdtCpqTAJfVxvjN7USPCEP36yZbkpNGXzqEm0hLsRFyhJohg==}
 
-  '@platforma-open/milaboratories.software-mitool@2.3.1-174-main':
-    resolution: {integrity: sha512-9A4XgO7oqMVmvdZL3vNDkgvloejdvh1+Kq6rfoBfB8/dWVJ4woQmEepIi0bLUfcJHQbjb7lVO79VhVRERc7EGg==}
+  '@platforma-open/milaboratories.software-mitool@2.3.1-24-main':
+    resolution: {integrity: sha512-2TxarvPNeL/+KMWQWoZJtBaNuz1sFDDaZvpLxrEc/hpDgDawLzVyqomCdlL9rBq7TZSC4SIirIEued61xQpJ4A==}
 
-  '@platforma-open/milaboratories.software-mixcr@4.7.0-415-develop':
-    resolution: {integrity: sha512-fJRMGcZeAz6/6dT9JNwrzvJaR8uuEN+kJs+x/GnQTMKZqbLZcUppTP3MvTNPEYlVpxiykhtJOkHbap5ajhakCA==}
+  '@platforma-open/milaboratories.software-mixcr@4.7.0-395-develop':
+    resolution: {integrity: sha512-wsP/00xS6i/WT+emqpYU9NC8BUyRfXmlkb7cvzCvzGn21wE634030QjIp9qYBKpheR6Ayi7wsqvl5NZYHDNvug==}
 
   '@platforma-open/milaboratories.software-ptabler.schema@1.15.28':
     resolution: {integrity: sha512-mk4KZSRSXVtQIu2142xzhBIMG7xPMEOAexZqb8l7FwlSuXvKk83RoqoxFYe2By4/DkAgbNeRQ7kCWYs7MACqig==}
@@ -1885,8 +1885,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@platforma-sdk/test@1.86.1':
-    resolution: {integrity: sha512-BSs3fMTMzmWTjgFcRgI28WXVhw7EGhGvrqbMP4Cw4kWFRRmKRTR8JzYNGGaCn0LgdIw1or8SEgwXSmXz3vRBlg==}
+  '@platforma-sdk/test@1.86.2':
+    resolution: {integrity: sha512-duDChJxHNHgwn+7CNfoSP+buuADtj3blmMLuCpnS7962zcZfqLJBA2VRVq6bSTXboVU/LT71sN9YvcC+0/ILcQ==}
 
   '@platforma-sdk/ui-vue@1.86.0':
     resolution: {integrity: sha512-jYGBcJ9uKXDJIre2xYQUd9nU8TjoFbNLpqasD9gcHtBcfVshcK9lAUAJJ7/EPKaqB4VYx3yECJWDq9yvUqAp5w==}
@@ -4418,145 +4418,121 @@ packages:
     resolution: {integrity: sha512-Oc2KInVkPfUjEB4PeV6X0NvIoyYTzDe/WmqFrTwBqKs6YKnz4A7XwWQvJTb7M0rLz9a6WgpUUiiS5QKaCi4O/g==}
     cpu: [arm64]
     os: [android]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-darwin-arm64@0.10.2':
     resolution: {integrity: sha512-3H7eNPIHJndUJXZ4QUGBPq1zC6RGcUZfm7bymJes+/N7wTVWUn1bxZ9JcozYHpkWQNm9f23G8YWbaHD9aYH72A==}
     cpu: [arm64]
     os: [darwin]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-darwin-x64@0.10.2':
     resolution: {integrity: sha512-AJOUpR2s3LF9AWiiub/Uyc/UoXNTWcq8hK3cVI6fUSXtwh34dG21J6hRuNlO6JVJFTo4o3ScVvZOrh/YFfUEAA==}
     cpu: [x64]
     os: [darwin]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-freebsd-x64@0.10.2':
     resolution: {integrity: sha512-ms7DcZu87u5CiK/wMwvpKAvAmtaqKjCQIXNweMLypG6qbuiaOMQf1jpbB5+j46xBcgCovo8TQMcv0bCQLKIL9w==}
     cpu: [x64]
     os: [freebsd]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm-gnu@0.10.2':
     resolution: {integrity: sha512-xJDpYAsKV5+eaiBhTYl05fvT6sst4PsCeuIFMRu9b0/WCSrNQPfCDtAQ5/MS6xNpsdujdZEPR+gmfWk3ZG5i3A==}
     cpu: [arm]
     os: [linux]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm-musl@0.10.2':
     resolution: {integrity: sha512-qfTkgd7AEx61l4K9VtXWCGTxc/fmXJ4ZheDz3i+/AAJUtg4sa0bPrc0VBxPggB/rayR8Z3+JfrBItuyanBJJ9Q==}
     cpu: [arm]
     os: [linux]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-gnu@0.10.2':
     resolution: {integrity: sha512-4e6Mifm/4UdjtU3D8mATIrvgP+xEiH8xtQOjd0zpd72XKWT7ug3sdyhq2utkkZFP6BvYp7SgZrI+aR4VeIOHdw==}
     cpu: [arm64]
     os: [linux]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-musl@0.10.2':
     resolution: {integrity: sha512-RdsJrUfDYFVV3JOmWFUWwSu31fa1APn12xDeIKxgl/YWxrabwtxsDBNjF2561c7tmcbiewdCUvngqRs8AyGVLA==}
     cpu: [arm64]
     os: [linux]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-gnu@0.10.2':
     resolution: {integrity: sha512-mVzWimEPPreaPyXIUvxsHoJzvO7ckZ5j0LgQFHz04zQIRwt9A9T2hA7K5/jYjJKkMxWG/U2VjhGNwVhtyU+uqg==}
     cpu: [x64]
     os: [linux]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-musl@0.10.2':
     resolution: {integrity: sha512-Y77fyISurmr2mvO1yeq3u+x/WJbACgPR4w+lzEVx30ViCxZzIGrZPRN1yEdZ9xUNPNsIO5thBHIdRNG+UGUG+Q==}
     cpu: [x64]
     os: [linux]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-win32-arm64@0.10.2':
     resolution: {integrity: sha512-1+tGLyG0u5YYy0lev4ck7/0sd8xJ9SZde0dLut7qLDPZV5WVTV8x6OxNXUne/PGuHZyO1vK+txPQzzHOyXHGSw==}
     cpu: [arm64]
     os: [win32]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-win32-x64@0.10.2':
     resolution: {integrity: sha512-8a2SExRohRbwC0MY4VpOF0/RSckrJ2ASZqAor5/RYSJJaeadR93n10gZzcKT6pY9ukiSOIZCRKVRD2tH73T0qA==}
     cpu: [x64]
     os: [win32]
-    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-parser/binding-android-arm64@0.10.2':
     resolution: {integrity: sha512-2VPBU9fRGRAQ2xPAvghnec3oou5Nrxm2Bezhf+13UMspAxQSkF/32r+ySKXSwIPA5/RivumDJDxAxc301Sgicw==}
     cpu: [arm64]
     os: [android]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-darwin-arm64@0.10.2':
     resolution: {integrity: sha512-LD+PMZE51tCYTOss5HBkm3/AE39MvcMDBfWJx7A4yDcjfNbAQDnHZKtzSOuqrswx+TQHY0ws5xn6+fWOwtmfBA==}
     cpu: [arm64]
     os: [darwin]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-darwin-x64@0.10.2':
     resolution: {integrity: sha512-mmZ8cND+AoIIMRERyMinlg5ApHxP23B9jH2B5wT7T+dliPa9rubLxneB/SUjFwyUjGaFnB5G7t4YvpfbO5zbkQ==}
     cpu: [x64]
     os: [darwin]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-freebsd-x64@0.10.2':
     resolution: {integrity: sha512-gVIjaaIddbRfAhHlC8N809wQWml7mxfSVnzaLtzGXObTeFTPAg/YVnQXt1UOhPM1ah5eG/8Y0RUlNpB4GVe7eQ==}
     cpu: [x64]
     os: [freebsd]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm-gnu@0.10.2':
     resolution: {integrity: sha512-q/XPPQQAPdlw05aPj30ygBhekmQryGOwxVraBgApjKK8yY1kNQgqq6XCYLF1WHSee+lhxclrTO7W0/bt7dR1GA==}
     cpu: [arm]
     os: [linux]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm-musl@0.10.2':
     resolution: {integrity: sha512-A+Cb0I1hFF4wilTQpWs79k1aNnj4B2tkrHx3zsuUNF9BtVY2zPZ4yeQEM/zjXrS/qJlNMZVK9NrWJjwdpnTrfg==}
     cpu: [arm]
     os: [linux]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm64-gnu@0.10.2':
     resolution: {integrity: sha512-aGNSzqIqqphFwAdIFwVvKIyXD1Iy3CxrEJVIZAT87Ecyi4vCmmDD2v2l9h+Gd3/wSy3JZlOI792LJbKAjyy9rQ==}
     cpu: [arm64]
     os: [linux]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm64-musl@0.10.2':
     resolution: {integrity: sha512-Ddl1sF0rtuCXyHGSOV6dcmdx+ETv1iD+IVFqQuOjzkJZWclxJxdBWX6ZJMRtTiGqGUTbqLEKiTXxpR/Bvqk+2A==}
     cpu: [arm64]
     os: [linux]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-x64-gnu@0.10.2':
     resolution: {integrity: sha512-/nlcpR6IF5U+0m5L9wvAIXeQa2DT+BXuvqKDsTcOTlcc0B4dHNyqE5hTXsS4hAyimpy2ZK8A1zMNF5hTrjg2cg==}
     cpu: [x64]
     os: [linux]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-x64-musl@0.10.2':
     resolution: {integrity: sha512-GX80dxTQD/M/OryyuxJcFzFENzry3cDFPvCFTyWogNWQH3fSHfMrNfpwpl1YzMos1eV9NygK5GSDG7VArQlb4w==}
     cpu: [x64]
     os: [linux]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-win32-arm64@0.10.2':
     resolution: {integrity: sha512-agePQBV4VHewiGU0ACSjscZ/hJd283f9JfAF19Gf1rI5+wy5tTgx4GS36i0b3xim15AQ4RCpDRosEvhLZ4zAOw==}
     cpu: [arm64]
     os: [win32]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-win32-x64@0.10.2':
     resolution: {integrity: sha512-s8//CMpgL5+y1lvDCdyh1rwGI5+ytDJywFJRe1vnhI7n0j+caxshNucurikYLLVeQ2SYFex6aPrzgQxkabBQRA==}
     cpu: [x64]
     os: [win32]
-    deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-toolchain/types@0.10.2':
     resolution: {integrity: sha512-sSeo4SSSToiS+sSD+bwn/s94EEcaLJ7tG5LCp8gFYC1G5VzxzX7fqB6m9RU1yMD8KTpu6zdU/I1NlQf8hVBJ9Q==}
@@ -8155,7 +8131,7 @@ snapshots:
       yaml: 2.9.1
       zod: 3.25.76
 
-  '@milaboratories/pl-drivers@1.16.35':
+  '@milaboratories/pl-drivers@1.16.36':
     dependencies:
       '@grpc/grpc-js': 1.14.5
       '@milaboratories/computable': 2.9.8
@@ -8204,7 +8180,7 @@ snapshots:
     dependencies:
       undici: 7.16.0
 
-  '@milaboratories/pl-middle-layer@1.74.10(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)':
+  '@milaboratories/pl-middle-layer@1.74.11(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)':
     dependencies:
       '@milaboratories/columns-collection-driver': 0.2.10
       '@milaboratories/computable': 2.9.8
@@ -8215,7 +8191,7 @@ snapshots:
       '@milaboratories/pl-client': 3.19.1
       '@milaboratories/pl-crash-recorder': 0.3.6
       '@milaboratories/pl-deployments': 3.0.22
-      '@milaboratories/pl-drivers': 1.16.35
+      '@milaboratories/pl-drivers': 1.16.36
       '@milaboratories/pl-errors': 1.4.53
       '@milaboratories/pl-http': 1.2.4
       '@milaboratories/pl-model-backend': 1.4.38
@@ -8884,9 +8860,9 @@ snapshots:
 
   '@platforma-open/milaboratories.samples-and-data@1.24.0': {}
 
-  '@platforma-open/milaboratories.software-mitool@2.3.1-174-main': {}
+  '@platforma-open/milaboratories.software-mitool@2.3.1-24-main': {}
 
-  '@platforma-open/milaboratories.software-mixcr@4.7.0-415-develop': {}
+  '@platforma-open/milaboratories.software-mixcr@4.7.0-395-develop': {}
 
   '@platforma-open/milaboratories.software-ptabler.schema@1.15.28':
     dependencies:
@@ -8987,11 +8963,11 @@ snapshots:
       commander: 15.0.0
       winston: 3.19.0
 
-  '@platforma-sdk/test@1.86.1(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@7.3.6(@types/node@26.6.2)(lightningcss@1.33.0)(yaml@2.9.1))':
+  '@platforma-sdk/test@1.86.2(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@7.3.6(@types/node@26.6.2)(lightningcss@1.33.0)(yaml@2.9.1))':
     dependencies:
       '@milaboratories/computable': 2.9.8
       '@milaboratories/pl-client': 3.19.1
-      '@milaboratories/pl-middle-layer': 1.74.10(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)
+      '@milaboratories/pl-middle-layer': 1.74.11(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)
       '@milaboratories/pl-tree': 1.16.5
       '@platforma-sdk/model': 1.86.0
       '@vitest/coverage-istanbul': 4.1.11(vitest@4.0.18(@types/node@26.6.2)(lightningcss@1.33.0)(yaml@2.9.1))
@@ -9017,11 +8993,11 @@ snapshots:
       - supports-color
       - vite
 
-  '@platforma-sdk/test@1.86.1(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(yaml@2.9.1))':
+  '@platforma-sdk/test@1.86.2(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(yaml@2.9.1))':
     dependencies:
       '@milaboratories/computable': 2.9.8
       '@milaboratories/pl-client': 3.19.1
-      '@milaboratories/pl-middle-layer': 1.74.10(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)
+      '@milaboratories/pl-middle-layer': 1.74.11(@bytecodealliance/preview2-shim@0.20.2)(@types/node@26.6.2)
       '@milaboratories/pl-tree': 1.16.5
       '@platforma-sdk/model': 1.86.0
       '@vitest/coverage-istanbul': 4.1.11(vitest@4.1.11)
